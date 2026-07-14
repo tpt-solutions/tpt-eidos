@@ -8,6 +8,7 @@ members = [
     "crates/eidos-codegen",
     "crates/eidos-cli",
     "crates/eidos-tests",
+    "crates/eidos-flight-math",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ eidos-parser = { path = "crates/eidos-parser" }
 eidos-kernel = { path = "crates/eidos-kernel" }
 eidos-erasure = { path = "crates/eidos-erasure" }
 eidos-codegen = { path = "crates/eidos-codegen" }
+eidos-flight-math = { path = "crates/eidos-flight-math" }
 
 [profile.release]
 opt-level = 3

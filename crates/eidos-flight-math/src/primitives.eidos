@@ -1,0 +1,48 @@
+// Reusable flight-control primitives for tpt-eidos (Phase 3 domain library).
+//
+// These are verified with `eidos-flight-math`'s lemma set. The QF_LRA prover
+// discharges every linear obligation; the non-linear facts (a vector normalized
+// by its own magnitude has magnitude 1) are admitted by the `normalized_vector`
+// trusted lemma. `pid_linear` is fully linear and needs no trusted lemma at all.
+
+type Vec3 = Array<f64, 3>;
+type Quat = Array<f64, 4>;
+type UnitVec3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };
+type UnitQuat = { q: Array<f64, 4> | q.magnitude() <= 1.0 };
+
+// Normalize a vector to unit length. Division is guarded by `mag > 0`; the
+// resulting unit-vector magnitude bound is discharged by the `normalized_vector`
+// trusted lemma (the divisor `mag` is a `let`-bound variable, so the then-branch
+// context `mag > 0` proves the division safe).
+fn safe_direction(raw: Vec3) -> UnitVec3
+    requires raw.magnitude() > 0.0
+{
+    let mag = raw.magnitude();
+    if mag > 0.0 {
+        return { v: raw.map(|x| x / mag) } as UnitVec3;
+    } else {
+        return { v: [0.0, 0.0, 0.0] } as UnitVec3;
+    }
+}
+
+// Quaternion normalization: same trust argument, one extra component. The
+// `else` branch returns the (constant) zero quaternion whose magnitude is 0.
+fn quat_normalize(q: Quat) -> UnitQuat
+    requires q.magnitude() > 0.0
+{
+    let mag = q.magnitude();
+    if mag > 0.0 {
+        return { q: q.map(|x| x / mag) } as UnitQuat;
+    } else {
+        return { q: [0.0, 0.0, 0.0, 0.0] } as UnitQuat;
+    }
+}
+
+// A fully linear PID step. No division, no non-linear obligation: the QF_LRA
+// prover discharges every proof obligation, so this primitive needs no trusted
+// lemma. Gains are assumed non-negative constants in the `requires` clause.
+fn pid_linear(err: Vec3, integ: Vec3, deriv: Vec3, kp: f64, ki: f64, kd: f64) -> Vec3
+    requires kp >= 0.0 && ki >= 0.0 && kd >= 0.0
+{
+    return zip(zip(err, integ), deriv).map(|((e, i), d)| kp * e + ki * i + kd * d);
+}

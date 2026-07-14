@@ -10,6 +10,7 @@
 //! allocates.
 
 use eidos_erasure::{CExpr, CExprKind, CoreFun, CoreModule, CoreType, StructDef};
+use eidos_parser::Pattern;
 
 /// Lower an erased core module to a `no_std` Rust source string.
 pub fn codegen(module: &CoreModule) -> String {
@@ -159,7 +160,8 @@ fn gen_expr(e: &CExpr) -> String {
         }
         CExprKind::Method { recv, name, args } => gen_method(recv, name, args),
         CExprKind::Lambda { params, body } => {
-            format!("|{}| {}", params.join(", "), gen_expr(body))
+            let ps = params.iter().map(gen_pattern).collect::<Vec<_>>().join(", ");
+            format!("|{ps}| {}", gen_expr(body))
         }
         CExprKind::Record(fields) => gen_record(e, fields),
         CExprKind::Return(inner) => format!("return {}", gen_expr(inner)),
@@ -218,15 +220,7 @@ fn gen_method(recv: &CExpr, name: &str, args: &[CExpr]) -> String {
                 CExprKind::Lambda { params, body } => (params.clone(), gen_expr(body)),
                 _ => (Vec::new(), gen_expr(lam)),
             };
-            let recv_is_zip = match &recv.kind {
-                CExprKind::Method { name, .. } => name == "zip",
-                _ => false,
-            };
-            let param_str = if recv_is_zip {
-                format!("({})", params.join(", "))
-            } else {
-                params.join(", ")
-            };
+            let param_str = gen_pattern_list(&params);
             format!("eidos_map({}, |{}| {})", r, param_str, body)
         }
         "zip" => {
@@ -258,6 +252,21 @@ fn gen_record(e: &CExpr, fields: &[(String, CExpr)]) -> String {
         Some(n) => format!("{} {{ {} }}", n, body),
         None => format!("({})", body),
     }
+}
+
+fn gen_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Var(v) => v.clone(),
+        Pattern::Tuple(ps) => format!("({})", gen_pattern_list(ps)),
+    }
+}
+
+fn gen_pattern_list(params: &[Pattern]) -> String {
+    params
+        .iter()
+        .map(gen_pattern)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn float_lit(n: f64) -> String {

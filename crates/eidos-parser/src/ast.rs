@@ -39,6 +39,14 @@ pub enum UnOp {
     Not,
 }
 
+/// A lambda parameter pattern. Supports nested tuples so that `zip` chains can
+/// be destructured, e.g. `zip(zip(a, b), c).map(|((x, y), z)| ...)`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pattern {
+    Var(String),
+    Tuple(Vec<Pattern>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Num(f64),
@@ -82,7 +90,7 @@ pub enum Expr {
     },
     /// `|p1, p2| body`
     Lambda {
-        params: Vec<String>,
+        params: Vec<Pattern>,
         body: Box<Expr>,
     },
     /// `{ field: value, ... }`

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use eidos_kernel::check;
+use eidos_flight_math::check_module;
 use eidos_parser::parse;
 
 fn main() -> ExitCode {
@@ -57,7 +57,7 @@ fn cmd_check(path: Option<&str>) -> Result<ExitCode, String> {
     let path = path.ok_or_else(|| format!("check requires a file path\n{}", usage()))?;
     let src = fs::read_to_string(path).map_err(|e| format!("cannot read `{path}`: {e}"))?;
     let module = parse(&src).map_err(|e| format!("parse error: {e}"))?;
-    let report = check(&module);
+    let report = check_module(&module);
     if report.ok() {
         println!("eidos: {}: verified ({})", path, count_ok(&report));
         Ok(ExitCode::SUCCESS)
@@ -106,7 +106,7 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
 
     let src = fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let module = parse(&src).map_err(|e| format!("parse error: {e}"))?;
-    let report = check(&module);
+    let report = check_module(&module);
     if !report.ok() {
         eprintln!(
             "eidos: {}: REJECTED (refusing to emit unverified code)",

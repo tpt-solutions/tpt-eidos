@@ -1,18 +1,17 @@
 [package]
-name = "eidos-cli"
+name = "eidos-flight-math"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Command-line entry point for tpt-eidos (eidos check / eidos build)"
-
-[[bin]]
-name = "eidos"
-path = "src/main.rs"
+description = "Pre-proved flight-control domain library for tpt-eidos (Phase 3)"
+publish = false
 
 [dependencies]
-eidos-parser.workspace = true
 eidos-kernel.workspace = true
+eidos-parser.workspace = true
+eidos-verifier.workspace = true
+
+[dev-dependencies]
 eidos-erasure.workspace = true
 eidos-codegen.workspace = true
-eidos-flight-math.workspace = true

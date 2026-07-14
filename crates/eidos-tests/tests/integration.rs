@@ -8,6 +8,7 @@ use eidos_codegen::codegen;
 use eidos_erasure::erase;
 use eidos_kernel::{check, ObligationStatus};
 use eidos_parser::parse;
+use eidos_flight_math::check_module;
 
 fn example_path(name: &str) -> PathBuf {
     let dir = env!("CARGO_MANIFEST_DIR");
@@ -114,4 +115,79 @@ fn generated_rust_compiles_no_std() {
         status.status.success(),
         "generated no_std Rust must compile:\n{stderr}"
     );
+}
+
+/// Phase 3 milestone: a real flight-control control law, written against the
+/// domain library, verifies under the domain-library lemma set.
+#[test]
+fn attitude_control_verifies_with_domain_library() {
+    let src = fs::read_to_string(example_path("attitude_control.eidos"))
+        .unwrap_or_else(|e| panic!("read attitude_control: {e}"));
+    let module = parse(&src).unwrap_or_else(|e| panic!("parse attitude_control: {e}"));
+    let report = check_module(&module);
+    assert!(
+        report.ok(),
+        "attitude_control.eidos should verify, errors: {:?}",
+        report.errors
+    );
+    let trusted = report
+        .obligations
+        .iter()
+        .any(|o| matches!(o.status, ObligationStatus::Trusted));
+    assert!(
+        trusted,
+        "expected the normalization postcondition to use a trusted lemma"
+    );
+}
+
+/// Phase 3 milestone: the verified control law erases to clean `no_std` Rust
+/// with no kernel/verifier types leaking into the generated source.
+#[test]
+fn attitude_control_emits_no_std_rust() {
+    let rust = codegen_file("attitude_control.eidos");
+    assert!(rust.contains("#![no_std]"));
+    assert!(rust.contains("pub fn attitude_control"));
+    assert!(rust.contains("pub struct UnitVec3"));
+    for leak in [
+        "Refine",
+        "Constraint",
+        "eidos_kernel",
+        "eidos_verifier",
+        "eidos_flight_math",
+        "Obligation",
+    ] {
+        assert!(!rust.contains(leak), "generated source leaked `{leak}`");
+    }
+}
+
+/// Phase 4 milestone: an LLM-suggested proof step is mechanically verified or
+/// rejected by the kernel — never trusted without kernel approval.
+#[test]
+fn proof_suggestion_accepted_and_rejected() {
+    use eidos_flight_math::{ProofStep, suggest_and_verify};
+
+    // A function that divides by its parameter with no guard: rejected.
+    let src = "fn div(x: f64) -> f64 { return x / x; }";
+
+    // A sound suggestion (strengthen the precondition) is accepted by the kernel.
+    let accepted = suggest_and_verify(
+        src,
+        &[ProofStep::StrengthenRequires {
+            fn_name: "div".into(),
+            extra: "x > 0.0".into(),
+        }],
+    )
+    .unwrap();
+    assert!(accepted[0].accepted, "kernel must accept the sound step");
+
+    // A useless suggestion that still allows x == 0 is rejected by the kernel.
+    let rejected = suggest_and_verify(
+        src,
+        &[ProofStep::StrengthenRequires {
+            fn_name: "div".into(),
+            extra: "x > -100.0".into(),
+        }],
+    )
+    .unwrap();
+    assert!(!rejected[0].accepted, "kernel must reject the unsound step");
 }

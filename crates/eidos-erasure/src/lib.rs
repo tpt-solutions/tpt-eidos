@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use eidos_parser::{BinOp, Expr, Fun, Item, Module, Type, UnOp};
+use eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
 
 /// A type with all refinement information stripped.
 #[derive(Clone, Debug, PartialEq)]
@@ -79,7 +79,7 @@ pub enum CExprKind {
     /// A closure `|params| body`, only ever emitted as a Rust closure inside a
     /// `map`/`zip` chain.
     Lambda {
-        params: Vec<String>,
+        params: Vec<Pattern>,
         body: Box<CExpr>,
     },
     /// A record literal. When its type is a generated struct it lowers to a

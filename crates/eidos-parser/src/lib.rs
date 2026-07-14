@@ -277,7 +277,7 @@ impl Parser {
                     self.eat(&Tok::Pipe)?;
                     let body = self.parse_expr()?;
                     ensures = Some(Expr::Lambda {
-                        params: vec![b],
+                        params: vec![Pattern::Var(b)],
                         body: Box::new(body),
                     });
                 }
@@ -659,22 +659,9 @@ impl Parser {
                 if self.peek() != Some(&Tok::Pipe) {
                     loop {
                         if self.peek() == Some(&Tok::LParen) {
-                            self.advance();
-                            let mut inner = Vec::new();
-                            if self.peek() != Some(&Tok::RParen) {
-                                loop {
-                                    inner.push(self.eat_ident()?);
-                                    if self.peek() == Some(&Tok::Comma) {
-                                        self.advance();
-                                        continue;
-                                    }
-                                    break;
-                                }
-                            }
-                            self.eat(&Tok::RParen)?;
-                            params.extend(inner);
+                            params.push(self.parse_param_pattern()?);
                         } else {
-                            params.push(self.eat_ident()?);
+                            params.push(Pattern::Var(self.eat_ident()?));
                         }
                         if self.peek() == Some(&Tok::Comma) {
                             self.advance();
@@ -696,6 +683,29 @@ impl Parser {
             None => Err(ParseError::UnexpectedEof),
         }
     }
+
+    /// Parse a (possibly nested) tuple parameter pattern, preserving the
+    /// grouping structure so that `((x, y), z)` parses to a nested `Pattern`.
+    fn parse_param_pattern(&mut self) -> Result<Pattern, ParseError> {
+        if self.peek() == Some(&Tok::LParen) {
+            self.advance();
+            let mut inner = Vec::new();
+            if self.peek() != Some(&Tok::RParen) {
+                loop {
+                    inner.push(self.parse_param_pattern()?);
+                    if self.peek() == Some(&Tok::Comma) {
+                        self.advance();
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.eat(&Tok::RParen)?;
+            Ok(Pattern::Tuple(inner))
+        } else {
+            Ok(Pattern::Var(self.eat_ident()?))
+        }
+    }
 }
 
 /// Parse tpt-eidos source into a `Module`.
@@ -707,6 +717,19 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
         return Err(ParseError::UnexpectedToken(format!("{:?}", p.peek())));
     }
     Ok(m)
+}
+
+/// Parse a single expression. The recursive-descent parser only produces a
+/// `Module`, so the expression is wrapped in a trivial function and the return
+/// value is extracted.
+pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
+    let m = parse(&format!("fn _() -> f64 {{ return {source}; }}"))?;
+    if let Item::Fn(f) = &m.items[0] {
+        if let Expr::Return(e) = &f.body {
+            return Ok((**e).clone());
+        }
+    }
+    Err(ParseError::Message("internal: parse_expr failed".into()))
 }
 
 #[cfg(test)]

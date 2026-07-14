@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use eidos_parser::{BinOp, Expr, Fun, Item, Module, Type, UnOp};
+use eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
 use eidos_verifier::{entails, unsat, Constraint, LinExpr, Rel};
 
 #[derive(Clone, Debug)]
@@ -49,9 +49,51 @@ impl Report {
     }
 }
 
-/// Type-check a whole module. Returns a `Report`; the module is accepted iff
-/// `report.ok()`.
+/// A trusted (non-linear) lemma the kernel may invoke to discharge an
+/// obligation it cannot prove with the QF_LRA prover alone.
+///
+/// `apply` inspects the obligation predicate and the current linear context.
+/// It returns:
+/// * `Some(side_conditions)` — the lemma *applies*. The obligation is trusted,
+///   provided every `Constraint` in `side_conditions` is itself provable by the
+///   linear prover (`entails`). An empty `Vec` means the lemma is an *admitted
+///   axiom* with no further proof required (the textbook fact is taken on
+///   trust, as is the point of the Phase-3 domain-library boundary).
+/// * `None` — the lemma does not match this obligation.
+///
+/// Lemmas are the only non-linear escape hatch. They are named and recorded so
+/// every trusted obligation can be traced back to a specific, reviewable fact
+/// (see `Report::obligations` and `eidos-flight-math`).
+#[derive(Clone, Copy)]
+pub struct Lemma {
+    pub name: &'static str,
+    pub apply: fn(&Expr, &[Constraint]) -> Option<Vec<Constraint>>,
+}
+
+impl Lemma {
+    /// Returns the lemma's side conditions if it applies to `pred` under `ctx`.
+    pub fn apply_to(&self, pred: &Expr, ctx: &[Constraint]) -> Option<Vec<Constraint>> {
+        (self.apply)(pred, ctx)
+    }
+}
+
+/// The lemmas the bare MVK ships with. Domain libraries (e.g. `eidos-flight-math`)
+/// extend this set via `check_with`.
+pub static DEFAULT_LEMMAS: &[Lemma] = &[Lemma {
+    name: "normalized_vector",
+    apply: lemma_normalized_vector,
+}];
+
+/// Type-check a whole module with the default lemma set. Equivalent to
+/// `check_with(module, DEFAULT_LEMMAS)`.
 pub fn check(module: &Module) -> Report {
+    check_with(module, DEFAULT_LEMMAS)
+}
+
+/// Type-check a whole module with a caller-supplied trusted-lemma set (the
+/// Phase-3 domain-library boundary). Returns a `Report`; the module is accepted
+/// iff `report.ok()`.
+pub fn check_with(module: &Module, lemmas: &[Lemma]) -> Report {
     let mut aliases: HashMap<String, Type> = HashMap::new();
     for it in &module.items {
         if let Item::TypeAlias { name, ty } = it {
@@ -61,7 +103,7 @@ pub fn check(module: &Module) -> Report {
     let mut report = Report::default();
     for it in &module.items {
         if let Item::Fn(f) = it {
-            let mut checker = Checker::new(&aliases);
+            let mut checker = Checker::new(&aliases, lemmas);
             checker.check_fun(f, &mut report);
         }
     }
@@ -70,15 +112,17 @@ pub fn check(module: &Module) -> Report {
 
 struct Checker<'a> {
     aliases: &'a HashMap<String, Type>,
+    lemmas: &'a [Lemma],
     ensures: Option<Expr>,
     ret: Type,
     current_fn: String,
 }
 
 impl<'a> Checker<'a> {
-    fn new(aliases: &'a HashMap<String, Type>) -> Self {
+    fn new(aliases: &'a HashMap<String, Type>, lemmas: &'a [Lemma]) -> Self {
         Checker {
             aliases,
+            lemmas,
             ensures: None,
             ret: Type::Base("_".into()),
             current_fn: String::new(),
@@ -202,7 +246,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(Expr::Lambda { params, body }) = &self.ensures {
-                    if let Some(p) = params.first() {
+                    if let Some(Pattern::Var(p)) = params.first() {
                         let inst = self.subst(body, p, e);
                         self.discharge(
                             &inst,
@@ -280,9 +324,9 @@ impl<'a> Checker<'a> {
                 });
                 return;
             }
-            if self.trusted_lemma(&pred, ctx) {
+            if let Some(name) = self.try_lemma(&pred, ctx) {
                 report.obligations.push(Obligation {
-                    description: desc.into(),
+                    description: format!("{desc} (trusted lemma: {name})"),
                     status: ObligationStatus::Trusted,
                 });
                 return;
@@ -297,9 +341,9 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        if self.trusted_lemma(&pred, ctx) {
+        if let Some(name) = self.try_lemma(&pred, ctx) {
             report.obligations.push(Obligation {
-                description: desc.into(),
+                description: format!("{desc} (trusted lemma: {name})"),
                 status: ObligationStatus::Trusted,
             });
             return;
@@ -313,49 +357,19 @@ impl<'a> Checker<'a> {
         });
     }
 
-    /// Trusted-lemma table (the Phase-3 domain-library boundary). The MVK's
-    /// linear prover cannot handle non-linear arithmetic, so textbook facts are
-    /// admitted here. See `spec.txt` §6 and TODO.md Phase 3.
-    fn trusted_lemma(&self, pred: &Expr, ctx: &[Constraint]) -> bool {
-        if let Expr::Bin { op, a, b } = pred {
-            if matches!(op, BinOp::Le | BinOp::Lt) {
-                if let Expr::Method { recv, name, args } = a.as_ref() {
-                    if name == "magnitude" && args.is_empty() {
-                        if let Expr::Num(1.0) = b.as_ref() {
-                            return self.is_normalized_vector(recv, ctx);
-                        }
-                    }
+    /// Try the trusted-lemma registry. Returns the name of the first lemma that
+    /// applies to `pred` and whose side conditions all `entails`-prove under
+    /// `ctx`. `None` if no lemma discharges the obligation.
+    fn try_lemma(&self, pred: &Expr, ctx: &[Constraint]) -> Option<&'static str> {
+        for lemma in self.lemmas {
+            if let Some(side) = lemma.apply_to(pred, ctx) {
+                let provable = side.iter().all(|c| entails(ctx, c));
+                if provable {
+                    return Some(lemma.name);
                 }
             }
         }
-        false
-    }
-
-    fn is_normalized_vector(&self, x: &Expr, ctx: &[Constraint]) -> bool {
-        match x {
-            Expr::ArrayLit(elems) => elems.iter().all(|e| matches!(e, Expr::Num(0.0))),
-            Expr::Method {
-                recv: _base,
-                name,
-                args,
-            } if name == "map" => {
-                if let Some(Expr::Lambda { params, body }) = args.first() {
-                    if params.len() == 1 {
-                        if let Expr::Bin {
-                            op: BinOp::Div, b, ..
-                        } = body.as_ref()
-                        {
-                            if let Some(mc) = self.linearize(b) {
-                                return entails(ctx, &Constraint::gt(mc));
-                            }
-                        }
-                    }
-                }
-                let _ = _base;
-                false
-            }
-            _ => false,
-        }
+        None
     }
 
     fn simplify(&self, e: &Expr) -> Expr {
@@ -435,7 +449,7 @@ impl<'a> Checker<'a> {
                 args: args.iter().map(|a| self.subst(a, var, val)).collect(),
             },
             Expr::Lambda { params, body } => {
-                if params.contains(&var.to_string()) {
+                if pattern_binds(params, var) {
                     Expr::Lambda {
                         params: params.clone(),
                         body: body.clone(),
@@ -462,41 +476,7 @@ impl<'a> Checker<'a> {
     }
 
     fn linearize(&self, e: &Expr) -> Option<LinExpr> {
-        match e {
-            Expr::Num(n) => Some(LinExpr::constant(*n)),
-            Expr::Var(v) => Some(LinExpr::var(v.clone())),
-            Expr::Un { op: UnOp::Neg, a } => Some(self.linearize(a)?.neg()),
-            Expr::Bin { op, a, b } => {
-                let la = self.linearize(a)?;
-                let lb = self.linearize(b)?;
-                match op {
-                    BinOp::Add => Some(la.add(&lb)),
-                    BinOp::Sub => Some(la.sub(&lb)),
-                    BinOp::Mul => {
-                        if let Expr::Num(k) = a.as_ref() {
-                            Some(lb.scale(*k))
-                        } else if let Expr::Num(k) = b.as_ref() {
-                            Some(la.scale(*k))
-                        } else {
-                            None
-                        }
-                    }
-                    BinOp::Div => {
-                        if let Expr::Num(k) = b.as_ref() {
-                            if k.abs() > 1e-12 {
-                                Some(la.scale(1.0 / *k))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
+        linearize(e)
     }
 
     fn to_constraint(&self, e: &Expr) -> Option<Constraint> {
@@ -646,6 +626,21 @@ impl<'a> Checker<'a> {
     }
 }
 
+fn patterns_to_string(params: &[Pattern]) -> String {
+    params
+        .iter()
+        .map(pattern_to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn pattern_to_string(p: &Pattern) -> String {
+    match p {
+        Pattern::Var(v) => v.clone(),
+        Pattern::Tuple(ps) => format!("({})", patterns_to_string(ps)),
+    }
+}
+
 fn expr_to_string(e: &Expr) -> String {
     match e {
         Expr::Num(n) => format!("{n}"),
@@ -685,7 +680,9 @@ fn expr_to_string(e: &Expr) -> String {
                 )
             }
         }
-        Expr::Lambda { params, .. } => format!("|{}| ..", params.join(", ")),
+        Expr::Lambda { params, .. } => {
+            format!("|{}| ..", patterns_to_string(params))
+        }
         Expr::Record(fields) => format!(
             "{{{}}}",
             fields
@@ -726,12 +723,125 @@ fn unop_str(op: UnOp) -> &'static str {
     }
 }
 
+/// Trusted `normalized_vector` lemma (the Phase-3 domain-library boundary).
+/// The MVK's linear prover cannot handle non-linear arithmetic, so the textbook
+/// fact "a vector normalized by its own magnitude has magnitude 1" is admitted
+/// as an axiom (no further side conditions). See `spec.txt` §6 and TODO.md
+/// Phase 3.
+///
+/// Matches obligations of the form `<recv>.magnitude() <= 1.0` (or `< 1.0`)
+/// where `<recv>` is either a zero literal `[0.0, ...]`, or a `map` whose body
+/// divides each element by the magnitude of the array being normalized (i.e.
+/// `x / mag` with `mag > 0` provable in context).
+pub fn lemma_normalized_vector(pred: &Expr, ctx: &[Constraint]) -> Option<Vec<Constraint>> {
+    if let Expr::Bin { op, a, b } = pred {
+        if matches!(op, BinOp::Le | BinOp::Lt) {
+            if let Expr::Num(1.0) = b.as_ref() {
+                if let Expr::Method { recv, name, args } = a.as_ref() {
+                    if name == "magnitude" && args.is_empty() && normalized_vector_shape(recv, ctx) {
+                        return Some(vec![]);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// True if any identifier bound by `params` equals `var`.
+fn pattern_binds(params: &[Pattern], var: &str) -> bool {
+    params.iter().any(|p| pattern_binds_one(p, var))
+}
+
+fn pattern_binds_one(p: &Pattern, var: &str) -> bool {
+    match p {
+        Pattern::Var(v) => v == var,
+        Pattern::Tuple(ps) => pattern_binds(ps, var),
+    }
+}
+
+fn normalized_vector_shape(x: &Expr, ctx: &[Constraint]) -> bool {
+    match x {
+        Expr::ArrayLit(elems) => literal_magnitude_le(elems, 1.0),
+        Expr::Method { name, args, .. } if name == "map" => {
+            if let Some(Expr::Lambda { params, body }) = args.first() {
+                if params.len() == 1 {
+                    if let Expr::Bin { op: BinOp::Div, b, .. } = body.as_ref() {
+                        if let Some(mc) = linearize(b) {
+                            return entails(ctx, &Constraint::gt(mc));
+                        }
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// True iff `elems` is a literal numeric array whose Euclidean norm is `<= bound`
+/// (exact, since the components are constants). Used so literals such as the
+/// quaternion identity `[0.0, 0.0, 0.0, 1.0]` are accepted by the
+/// `normalized_vector` lemma.
+fn literal_magnitude_le(elems: &[Expr], bound: f64) -> bool {
+    let mut sum_sq = 0.0f64;
+    for e in elems {
+        if let Expr::Num(n) = e {
+            sum_sq += n * n;
+        } else {
+            return false;
+        }
+    }
+    sum_sq.sqrt() <= bound + 1e-9
+}
+
 fn type_name(ty: &Type) -> String {
     match ty {
         Type::Base(s) => s.clone(),
         Type::Named(s) => s.clone(),
         Type::Array(inner, n) => format!("Array<{}, {}>", type_name(inner), n),
         Type::Refine { bind, ty, .. } => format!("{{ {}: {} | .. }}", bind, type_name(ty)),
+    }
+}
+
+/// Linearize an expression into a `LinExpr` (used by `to_constraint`, `cmp`, and
+/// the `normalized_vector` lemma). Returns `None` for genuinely non-linear
+/// sub-expressions (products of two variables, `magnitude()`, ...).
+fn linearize(e: &Expr) -> Option<LinExpr> {
+    match e {
+        Expr::Num(n) => Some(LinExpr::constant(*n)),
+        Expr::Var(v) => Some(LinExpr::var(v.clone())),
+        Expr::Un { op: UnOp::Neg, a } => Some(linearize(a)?.neg()),
+        Expr::Bin { op, a, b } => {
+            let la = linearize(a)?;
+            let lb = linearize(b)?;
+            match op {
+                BinOp::Add => Some(la.add(&lb)),
+                BinOp::Sub => Some(la.sub(&lb)),
+                BinOp::Mul => {
+                    if let Expr::Num(k) = a.as_ref() {
+                        Some(lb.scale(*k))
+                    } else if let Expr::Num(k) = b.as_ref() {
+                        Some(la.scale(*k))
+                    } else {
+                        None
+                    }
+                }
+                BinOp::Div => {
+                    if let Expr::Num(k) = b.as_ref() {
+                        if k.abs() > 1e-12 {
+                            Some(la.scale(1.0 / *k))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

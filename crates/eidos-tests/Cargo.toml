@@ -14,3 +14,4 @@ eidos-kernel.workspace = true
 [dev-dependencies]
 eidos-erasure.workspace = true
 eidos-codegen.workspace = true
+eidos-flight-math.workspace = true

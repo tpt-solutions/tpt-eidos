@@ -1,0 +1,47 @@
+// A real flight-control control law written against the tpt-eidos domain
+// library (eidos-flight-math). It computes a commanded torque direction from
+// the attitude error between a measured and a reference unit vector, scaled by
+// a bounded gain, and returns a unit vector so downstream actuator saturation
+// cannot produce a magnitude > 1.
+//
+// Verified by `eidos check` / `eidos build` using the domain-library lemma set:
+// the only non-linear fact it relies on is "normalize-by-own-magnitude yields a
+// unit vector", discharged by the `normalized_vector` trusted lemma.
+
+type Vec3 = Array<f64, 3>;
+type UnitVec3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };
+
+// Safe normalization: divide by the magnitude only after proving it non-zero.
+fn safe_direction(raw: Vec3) -> UnitVec3
+    requires raw.magnitude() > 0.0
+{
+    let mag = raw.magnitude();
+    if mag > 0.0 {
+        return { v: raw.map(|x| x / mag) } as UnitVec3;
+    } else {
+        return { v: [0.0, 0.0, 0.0] } as UnitVec3;
+    }
+}
+
+// Attitude control law: error direction (measured - reference), scaled by the
+// gain, renormalized to a unit command. `gain` in [0, 1] keeps the raw command
+// inside the unit ball before normalization, so the resulting command is a
+// valid unit vector (proven by the trusted `normalized_vector` lemma).
+fn attitude_control(
+    measured: Vec3,
+    reference: Vec3,
+    gain: f64
+) -> UnitVec3
+    requires measured.magnitude() <= 1.0
+          && reference.magnitude() <= 1.0
+          && gain >= 0.0 && gain <= 1.0
+{
+    let err = measured.zip(reference).map(|(m, r)| m - r);
+    let cmd = err.map(|e| e * gain);
+    let mag = cmd.magnitude();
+    if mag > 0.0 {
+        return { v: cmd.map(|e| e / mag) } as UnitVec3;
+    } else {
+        return { v: [0.0, 0.0, 0.0] } as UnitVec3;
+    }
+}
