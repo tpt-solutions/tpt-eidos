@@ -6,9 +6,9 @@ use std::process::Command;
 
 use eidos_codegen::codegen;
 use eidos_erasure::erase;
+use eidos_flight_math::check_module;
 use eidos_kernel::{check, ObligationStatus};
 use eidos_parser::parse;
-use eidos_flight_math::check_module;
 
 fn example_path(name: &str) -> PathBuf {
     let dir = env!("CARGO_MANIFEST_DIR");
@@ -164,7 +164,7 @@ fn attitude_control_emits_no_std_rust() {
 /// rejected by the kernel — never trusted without kernel approval.
 #[test]
 fn proof_suggestion_accepted_and_rejected() {
-    use eidos_flight_math::{ProofStep, suggest_and_verify};
+    use eidos_flight_math::{suggest_and_verify, ProofStep};
 
     // A function that divides by its parameter with no guard: rejected.
     let src = "fn div(x: f64) -> f64 { return x / x; }";

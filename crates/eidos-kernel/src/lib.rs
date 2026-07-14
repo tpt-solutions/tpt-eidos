@@ -179,8 +179,9 @@ impl<'a> Checker<'a> {
             Expr::Bin { op, a, b } => {
                 self.walk(a, ctx, report);
                 self.walk(b, ctx, report);
-                if *op == BinOp::Div {
-                    self.check_division(b, ctx, report);
+                if matches!(op, BinOp::Div | BinOp::Rem) {
+                    let kind = if *op == BinOp::Div { "division" } else { "remainder" };
+                    self.check_division(b, ctx, report, kind);
                 }
             }
             Expr::Un { a, .. } => self.walk(a, ctx, report),
@@ -738,7 +739,8 @@ pub fn lemma_normalized_vector(pred: &Expr, ctx: &[Constraint]) -> Option<Vec<Co
         if matches!(op, BinOp::Le | BinOp::Lt) {
             if let Expr::Num(1.0) = b.as_ref() {
                 if let Expr::Method { recv, name, args } = a.as_ref() {
-                    if name == "magnitude" && args.is_empty() && normalized_vector_shape(recv, ctx) {
+                    if name == "magnitude" && args.is_empty() && normalized_vector_shape(recv, ctx)
+                    {
                         return Some(vec![]);
                     }
                 }
@@ -766,7 +768,10 @@ fn normalized_vector_shape(x: &Expr, ctx: &[Constraint]) -> bool {
         Expr::Method { name, args, .. } if name == "map" => {
             if let Some(Expr::Lambda { params, body }) = args.first() {
                 if params.len() == 1 {
-                    if let Expr::Bin { op: BinOp::Div, b, .. } = body.as_ref() {
+                    if let Expr::Bin {
+                        op: BinOp::Div, b, ..
+                    } = body.as_ref()
+                    {
                         if let Some(mc) = linearize(b) {
                             return entails(ctx, &Constraint::gt(mc));
                         }

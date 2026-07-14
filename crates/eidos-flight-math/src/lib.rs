@@ -13,7 +13,7 @@
 
 mod prover;
 
-pub use prover::{ProofStep, SuggestOutcome, suggest_and_verify};
+pub use prover::{suggest_and_verify, ProofStep, SuggestOutcome};
 
 use eidos_kernel::{check_with, Lemma, Report, DEFAULT_LEMMAS};
 use eidos_parser::{parse, BinOp, Expr, Module};
@@ -121,7 +121,11 @@ mod tests {
         // `check_module` (the domain environment) is the entry point used.
         let module = parse(PRIMITIVES_EIDOS).expect("parse primitives");
         let r = check_module(&module);
-        assert!(r.ok(), "domain environment must verify primitives: {:?}", r.errors);
+        assert!(
+            r.ok(),
+            "domain environment must verify primitives: {:?}",
+            r.errors
+        );
     }
 
     #[test]

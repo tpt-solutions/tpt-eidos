@@ -160,7 +160,11 @@ fn gen_expr(e: &CExpr) -> String {
         }
         CExprKind::Method { recv, name, args } => gen_method(recv, name, args),
         CExprKind::Lambda { params, body } => {
-            let ps = params.iter().map(gen_pattern).collect::<Vec<_>>().join(", ");
+            let ps = params
+                .iter()
+                .map(gen_pattern)
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("|{ps}| {}", gen_expr(body))
         }
         CExprKind::Record(fields) => gen_record(e, fields),

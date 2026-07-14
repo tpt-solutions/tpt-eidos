@@ -10,7 +10,7 @@
 use eidos_kernel::{CheckError, Obligation, Report};
 use eidos_parser::{parse, parse_expr, BinOp, Expr, Fun, Item, Module};
 
-use super::{AGENT_LEMMAS, Lemma};
+use super::{Lemma, AGENT_LEMMAS};
 
 /// A candidate proof step proposed by an external agent.
 #[derive(Clone, Debug, PartialEq)]
@@ -184,22 +184,9 @@ fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> SumB {
         let src = "fn f(a: Array<f64, 3>) -> Array<f64, 3> { return a; }";
         let out = suggest_and_verify(src, &[ProofStep::ApplyLemma("nope".into())]).unwrap();
         assert!(!out[0].accepted);
-        assert!(out[0].errors.iter().any(|e| e.message.contains("unknown lemma")));
-    }
-
-    #[test]
-    fn debug_lemma_shape() {
-        let src = "type SumB = { s: Array<f64, 3> | s.magnitude() <= 2.0 };
-fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> SumB {
-    return { s: a.zip(b).map(|(x, y)| x + y) } as SumB;
-}";
-        let m = eidos_parser::parse(src).unwrap();
-        if let eidos_parser::Item::TypeAlias { ty, .. } = &m.items[0] {
-            if let eidos_parser::Type::Refine { pred, .. } = ty {
-                eprintln!("PRED = {pred:?}");
-                let r = super::lemma_triangle_for_add(pred, &[]);
-                eprintln!("LEMMA RESULT = {r:?}");
-            }
-        }
+        assert!(out[0]
+            .errors
+            .iter()
+            .any(|e| e.message.contains("unknown lemma")));
     }
 }
