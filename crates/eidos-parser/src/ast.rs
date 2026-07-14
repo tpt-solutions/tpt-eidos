@@ -53,7 +53,10 @@ pub enum Expr {
         b: Box<Expr>,
     },
     /// Unary operator application.
-    Un { op: UnOp, a: Box<Expr> },
+    Un {
+        op: UnOp,
+        a: Box<Expr>,
+    },
     /// `if cond { then } else { els }`
     If {
         cond: Box<Expr>,
@@ -67,7 +70,10 @@ pub enum Expr {
         body: Box<Expr>,
     },
     /// `f(args)`
-    Call { func: String, args: Vec<Expr> },
+    Call {
+        func: String,
+        args: Vec<Expr>,
+    },
     /// `recv.method(args)`
     Method {
         recv: Box<Expr>,
@@ -75,11 +81,17 @@ pub enum Expr {
         args: Vec<Expr>,
     },
     /// `|p1, p2| body`
-    Lambda { params: Vec<String>, body: Box<Expr> },
+    Lambda {
+        params: Vec<String>,
+        body: Box<Expr>,
+    },
     /// `{ field: value, ... }`
     Record(Vec<(String, Expr)>),
     /// `value as Type`
-    Cast { value: Box<Expr>, ty: Box<Type> },
+    Cast {
+        value: Box<Expr>,
+        ty: Box<Type>,
+    },
     /// `return e`
     Return(Box<Expr>),
 }
@@ -98,7 +110,7 @@ pub struct Fun {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
     TypeAlias { name: String, ty: Type },
-    Fn(Fun),
+    Fn(Box<Fun>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

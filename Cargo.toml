@@ -4,6 +4,8 @@ members = [
     "crates/eidos-verifier",
     "crates/eidos-parser",
     "crates/eidos-kernel",
+    "crates/eidos-erasure",
+    "crates/eidos-codegen",
     "crates/eidos-cli",
     "crates/eidos-tests",
 ]
@@ -18,6 +20,8 @@ rust-version = "1.74"
 eidos-verifier = { path = "crates/eidos-verifier" }
 eidos-parser = { path = "crates/eidos-parser" }
 eidos-kernel = { path = "crates/eidos-kernel" }
+eidos-erasure = { path = "crates/eidos-erasure" }
+eidos-codegen = { path = "crates/eidos-codegen" }
 
 [profile.release]
 opt-level = 3

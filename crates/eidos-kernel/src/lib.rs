@@ -174,7 +174,15 @@ impl<'a> Checker<'a> {
             Expr::Cast { value, ty } => {
                 self.walk(value, ctx, report);
                 if let Some(Type::Refine { bind, pred, .. }) = self.as_refine(ty) {
-                    let inst = self.subst(&pred, &bind, value);
+                    let target: &Expr = match value.as_ref() {
+                        Expr::Record(fields) => fields
+                            .iter()
+                            .find(|(f, _)| f == &bind)
+                            .map(|(_, v)| v)
+                            .unwrap_or(value),
+                        _ => value,
+                    };
+                    let inst = self.subst(&pred, &bind, target);
                     self.discharge(
                         &inst,
                         ctx,
@@ -221,12 +229,14 @@ impl<'a> Checker<'a> {
                         status: ObligationStatus::Verified,
                     });
                 } else {
-                    let ce = eidos_verifier::counterexample(ctx, &ob);
+                    let ce = eidos_verifier::find_model(&cs);
                     let detail = ce
                         .map(|m| format!("counterexample: {:?}", m))
                         .unwrap_or_default();
                     report.errors.push(CheckError {
-                        message: format!("possible division by zero: denominator could be zero. {detail}"),
+                        message: format!(
+                            "possible division by zero: denominator could be zero. {detail}"
+                        ),
                     });
                     report.obligations.push(Obligation {
                         description: desc,
@@ -324,13 +334,15 @@ impl<'a> Checker<'a> {
     fn is_normalized_vector(&self, x: &Expr, ctx: &[Constraint]) -> bool {
         match x {
             Expr::ArrayLit(elems) => elems.iter().all(|e| matches!(e, Expr::Num(0.0))),
-            Expr::Method { recv: _base, name, args } if name == "map" => {
+            Expr::Method {
+                recv: _base,
+                name,
+                args,
+            } if name == "map" => {
                 if let Some(Expr::Lambda { params, body }) = args.first() {
                     if params.len() == 1 {
                         if let Expr::Bin {
-                            op: BinOp::Div,
-                            b,
-                            ..
+                            op: BinOp::Div, b, ..
                         } = body.as_ref()
                         {
                             if let Some(mc) = self.linearize(b) {
@@ -410,7 +422,9 @@ impl<'a> Checker<'a> {
                 then: Box::new(self.subst(then, var, val)),
                 els: Box::new(self.subst(els, var, val)),
             },
-            Expr::ArrayLit(es) => Expr::ArrayLit(es.iter().map(|x| self.subst(x, var, val)).collect()),
+            Expr::ArrayLit(es) => {
+                Expr::ArrayLit(es.iter().map(|x| self.subst(x, var, val)).collect())
+            }
             Expr::Method { recv, name, args } => Expr::Method {
                 recv: Box::new(self.subst(recv, var, val)),
                 name: name.clone(),
@@ -451,10 +465,7 @@ impl<'a> Checker<'a> {
         match e {
             Expr::Num(n) => Some(LinExpr::constant(*n)),
             Expr::Var(v) => Some(LinExpr::var(v.clone())),
-            Expr::Un {
-                op: UnOp::Neg,
-                a,
-            } => Some(self.linearize(a)?.neg()),
+            Expr::Un { op: UnOp::Neg, a } => Some(self.linearize(a)?.neg()),
             Expr::Bin { op, a, b } => {
                 let la = self.linearize(a)?;
                 let lb = self.linearize(b)?;
@@ -501,7 +512,10 @@ impl<'a> Checker<'a> {
                     BinOp::Eq => Rel::Eq,
                     _ => return None,
                 };
-                Some(Constraint { rel, e: la.sub(&lb) })
+                Some(Constraint {
+                    rel,
+                    e: la.sub(&lb),
+                })
             }
             _ => None,
         }
@@ -528,7 +542,10 @@ impl<'a> Checker<'a> {
 
     fn cmp(&self, a: &Expr, b: &Expr, rel: Rel) -> Vec<Constraint> {
         match (self.linearize(a), self.linearize(b)) {
-            (Some(la), Some(lb)) => vec![Constraint { rel, e: la.sub(&lb) }],
+            (Some(la), Some(lb)) => vec![Constraint {
+                rel,
+                e: la.sub(&lb),
+            }],
             _ => vec![],
         }
     }
@@ -555,10 +572,7 @@ impl<'a> Checker<'a> {
                 BinOp::Ne => Some(self.cmp(a, b, Rel::Eq)),
                 _ => None,
             },
-            Expr::Un {
-                op: UnOp::Not,
-                a,
-            } => Some(self.path_constraints(a)),
+            Expr::Un { op: UnOp::Not, a } => Some(self.path_constraints(a)),
             _ => None,
         }
     }
@@ -651,7 +665,10 @@ fn expr_to_string(e: &Expr) -> String {
         Expr::Call { func, args } => format!(
             "{}({})",
             func,
-            args.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(expr_to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Method { recv, name, args } => {
             if args.is_empty() {
@@ -661,7 +678,10 @@ fn expr_to_string(e: &Expr) -> String {
                     "{}.{}({})",
                     expr_to_string(recv),
                     name,
-                    args.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+                    args.iter()
+                        .map(expr_to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             }
         }
@@ -739,7 +759,10 @@ mod tests {
         let src = "fn f(a: f64) -> f64 { return a / a; }";
         let r = check_src(src);
         assert!(!r.ok(), "expected rejection");
-        assert!(r.errors.iter().any(|e| e.message.contains("division by zero")));
+        assert!(r
+            .errors
+            .iter()
+            .any(|e| e.message.contains("division by zero")));
     }
 
     #[test]

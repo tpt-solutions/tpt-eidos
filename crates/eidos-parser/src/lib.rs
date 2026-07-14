@@ -70,6 +70,13 @@ enum Tok {
     Not,
 }
 
+fn is_base_type(s: &str) -> bool {
+    matches!(
+        s,
+        "f64" | "f32" | "i64" | "i32" | "i8" | "u64" | "u32" | "u8" | "bool" | "char" | "Unit"
+    )
+}
+
 fn keyword(s: &str) -> Option<Tok> {
     Some(match s {
         "fn" => Tok::Fn,
@@ -106,13 +113,17 @@ impl Lexer {
                 }
                 continue;
             }
-            if c.is_ascii_digit() || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit()) {
+            if c.is_ascii_digit()
+                || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit())
+            {
                 let start = i;
                 while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
                     i += 1;
                 }
                 let s: String = chars[start..i].iter().collect();
-                let v: f64 = s.parse().map_err(|_| ParseError::InvalidNumber(s.clone()))?;
+                let v: f64 = s
+                    .parse()
+                    .map_err(|_| ParseError::InvalidNumber(s.clone()))?;
                 toks.push(Tok::Num(v));
                 continue;
             }
@@ -139,11 +150,12 @@ impl Lexer {
                 '.' => (Tok::Dot, 1),
                 '+' => (Tok::Plus, 1),
                 '-' if i + 1 < chars.len() && chars[i + 1] == '>' => (Tok::Arrow, 2),
+                '!' if i + 1 < chars.len() && chars[i + 1] == '=' => (Tok::Ne, 2),
+                '!' => (Tok::Not, 1),
                 '-' => (Tok::Minus, 1),
                 '*' => (Tok::Star, 1),
                 '/' => (Tok::Slash, 1),
                 '%' => (Tok::Percent, 1),
-                '!' => (Tok::Not, 1),
                 '=' if i + 1 < chars.len() && chars[i + 1] == '=' => (Tok::EqEq, 2),
                 '=' => (Tok::Eq, 1),
                 '<' if i + 1 < chars.len() && chars[i + 1] == '=' => (Tok::Le, 2),
@@ -193,7 +205,9 @@ impl Parser {
                 self.pos += 1;
                 Ok(())
             }
-            Some(x) => Err(ParseError::UnexpectedToken(format!("{x:?} (expected {t:?})"))),
+            Some(x) => Err(ParseError::UnexpectedToken(format!(
+                "{x:?} (expected {t:?})"
+            ))),
             None => Err(ParseError::UnexpectedEof),
         }
     }
@@ -201,7 +215,9 @@ impl Parser {
     fn eat_ident(&mut self) -> Result<String, ParseError> {
         match self.advance() {
             Some(Tok::Ident(s)) => Ok(s),
-            Some(t) => Err(ParseError::UnexpectedToken(format!("{t:?} (expected identifier)"))),
+            Some(t) => Err(ParseError::UnexpectedToken(format!(
+                "{t:?} (expected identifier)"
+            ))),
             None => Err(ParseError::UnexpectedEof),
         }
     }
@@ -221,6 +237,9 @@ impl Parser {
                 let name = self.eat_ident()?;
                 self.eat(&Tok::Eq)?;
                 let ty = self.parse_type()?;
+                if self.peek() == Some(&Tok::Semi) {
+                    self.advance();
+                }
                 Ok(Item::TypeAlias { name, ty })
             }
             Some(Tok::Fn) => {
@@ -285,7 +304,7 @@ impl Parser {
                     self.advance();
                 }
                 self.eat(&Tok::RBrace)?;
-                Ok(Item::Fn(Fun {
+                Ok(Item::Fn(Box::new(Fun {
                     name,
                     params,
                     ret,
@@ -293,7 +312,7 @@ impl Parser {
                     ensures,
                     effects,
                     body,
-                }))
+                })))
             }
             _ => Err(ParseError::UnexpectedToken(format!(
                 "{:?} (expected item)",
@@ -325,19 +344,31 @@ impl Parser {
             let n = match self.advance() {
                 Some(Tok::Num(n)) => {
                     if n.fract() != 0.0 {
-                        return Err(ParseError::Message("Array length must be an integer".into()));
+                        return Err(ParseError::Message(
+                            "Array length must be an integer".into(),
+                        ));
                     }
                     n as u64
                 }
-                Some(t) => return Err(ParseError::UnexpectedToken(format!("{t:?} (expected length)"))),
+                Some(t) => {
+                    return Err(ParseError::UnexpectedToken(format!(
+                        "{t:?} (expected length)"
+                    )))
+                }
                 None => return Err(ParseError::UnexpectedEof),
             };
             self.eat(&Tok::Gt)?;
             return Ok(Type::Array(Box::new(inner), n));
         }
         match self.advance() {
-            Some(Tok::Ident(s)) => Ok(Type::Named(s)),
-            Some(t) => Err(ParseError::UnexpectedToken(format!("{t:?} (expected type)"))),
+            Some(Tok::Ident(s)) => Ok(if is_base_type(&s) {
+                Type::Base(s)
+            } else {
+                Type::Named(s)
+            }),
+            Some(t) => Err(ParseError::UnexpectedToken(format!(
+                "{t:?} (expected type)"
+            ))),
             None => Err(ParseError::UnexpectedEof),
         }
     }
@@ -549,7 +580,11 @@ impl Parser {
                     e = Expr::Call {
                         func: match e {
                             Expr::Var(f) => f,
-                            _ => return Err(ParseError::Message("call target must be a name".into())),
+                            _ => {
+                                return Err(ParseError::Message(
+                                    "call target must be a name".into(),
+                                ))
+                            }
                         },
                         args,
                     };
@@ -650,9 +685,14 @@ impl Parser {
                 }
                 self.eat(&Tok::Pipe)?;
                 let body = self.parse_expr()?;
-                Ok(Expr::Lambda { params, body: Box::new(body) })
+                Ok(Expr::Lambda {
+                    params,
+                    body: Box::new(body),
+                })
             }
-            Some(t) => Err(ParseError::UnexpectedToken(format!("{t:?} (expected primary)"))),
+            Some(t) => Err(ParseError::UnexpectedToken(format!(
+                "{t:?} (expected primary)"
+            ))),
             None => Err(ParseError::UnexpectedEof),
         }
     }
@@ -689,7 +729,10 @@ mod tests {
     fn parse_refine() {
         let m = parse("type P = { x: f64 | x > 0.0 };").unwrap();
         match &m.items[0] {
-            Item::TypeAlias { ty: Type::Refine { bind, .. }, .. } => assert_eq!(bind, "x"),
+            Item::TypeAlias {
+                ty: Type::Refine { bind, .. },
+                ..
+            } => assert_eq!(bind, "x"),
             other => panic!("unexpected: {other:?}"),
         }
     }

@@ -13,3 +13,5 @@ path = "src/main.rs"
 [dependencies]
 eidos-parser.workspace = true
 eidos-kernel.workspace = true
+eidos-erasure.workspace = true
+eidos-codegen.workspace = true

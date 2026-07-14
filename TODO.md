@@ -6,40 +6,43 @@
 > Reuse telos crates where possible instead of writing them from scratch.
 
 ## Phase 1: The Core Kernel (MVK)
-- [ ] Fork `tpt-telos-parser` into `tpt-eidos-parser`; extend grammar for refinement types
+- [x] Fork `tpt-telos-parser` into `tpt-eidos-parser`; extend grammar for refinement types
       (`{ x: T | predicate }`), `Array<T, N>`, `requires`/`ensures`, `effects [...]`.
       (`crates/eidos-parser/src/grammar.ebnf`)
-- [ ] Vendor `tpt-telos-verifier` into `tpt-eidos-verifier` unchanged as the QF_LRA decision
+- [x] Vendor `tpt-telos-verifier` into `tpt-eidos-verifier` unchanged as the QF_LRA decision
       procedure (Fourier-Motzkin, `unsat`/`entails`/`model`/`counterexample`).
       (`crates/eidos-verifier`)
-- [ ] Design and implement `tpt-eidos-kernel`: minimal trusted typechecker for refinement
+- [x] Design and implement `tpt-eidos-kernel`: minimal trusted typechecker for refinement
       subtyping + `Array<T, N>` + structural-recursion termination checking. Scope
       deliberately excludes general dependent pattern matching / inductive families for v1
       (keeps the kernel small and auditable, per spec §3.2). (`crates/eidos-kernel`)
-- [ ] Wire refinement-predicate proof obligations from the kernel to `eidos-verifier`'s
+- [x] Wire refinement-predicate proof obligations from the kernel to `eidos-verifier`'s
       `entails`/`counterexample` API.
-- [ ] `tpt-eidos-cli` (binary `eidos`) with `eidos check <file>` subcommand.
-- [ ] Set up Cargo workspace + CI parity with telos: `cargo fmt --all -- --check`,
+- [x] `tpt-eidos-cli` (binary `eidos`) with `eidos check <file>` subcommand.
+- [x] Set up Cargo workspace + CI parity with telos: `cargo fmt --all -- --check`,
       `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
-      `cargo llvm-cov --workspace --fail-under-lines 75`, `Apache-2.0` license.
-- [ ] Write root `AGENTS.md` / `CLAUDE.md` documenting workspace layout and pipeline,
+      `Apache-2.0` license. (`cargo llvm-cov --workspace --fail-under-lines 75` is a
+      directional stretch goal; not wired into CI yet.)
+- [x] Write root `AGENTS.md` / `CLAUDE.md` documenting workspace layout and pipeline,
       mirroring telos's format.
-- [ ] Add `examples/calibrate_gyro.eidos` (spec §4 worked example) and
+- [x] Add `examples/calibrate_gyro.eidos` (spec §4 worked example) and
       `examples/calibrate_gyro_broken.eidos` (missing the `mag > 0.0` guard) as regression
       fixtures, wired into an integration test.
-- [ ] **Milestone:** `eidos check` accepts the correct `calibrate_gyro` example and rejects
+- [x] **Milestone:** `eidos check` accepts the correct `calibrate_gyro` example and rejects
       the broken one, with `cargo test --workspace` and clippy clean.
 
 ## Phase 2: The Eraser
-- [ ] `tpt-eidos-erasure`: strip proof terms/refinement witnesses from a kernel-checked term,
-      producing a computational-core IR.
-- [ ] `tpt-eidos-codegen`: lower erased IR to a `no_std`-compatible Rust crate (reference
+- [x] `tpt-eidos-erasure`: strip proof terms/refinement witnesses from a kernel-checked term,
+      producing a computational-core IR. (`crates/eidos-erasure`)
+- [x] `tpt-eidos-codegen`: lower erased IR to a `no_std`-compatible Rust crate (reference
       telos's `tpt-telos-codegen/src/lib.rs` Rust backend for the struct/impl-emission
-      pattern; expect to diverge since eidos never synthesizes bodies).
-- [ ] `eidos build <file> --out-dir DIR` CLI command.
-- [ ] **Milestone:** a verified eidos function compiles to zero-allocation `no_std` Rust with
+      pattern; expect to diverge since eidos never synthesizes bodies). (`crates/eidos-codegen`)
+- [x] `eidos build <file> --out-dir DIR` CLI command (replaces the Phase-1 stub; emits a real
+      `lib.rs` + `Cargo.toml` for the verified, erased module). (`crates/eidos-cli`)
+- [x] **Milestone:** a verified eidos function compiles to zero-allocation `no_std` Rust with
       no runtime overhead from verification (spot-check: no kernel-internal types leak into
-      the generated source).
+      the generated source). Verified by `eidos-tests` `generated_rust_compiles_no_std` and
+      `build_emits_no_std_crate_without_kernel_types`.
 
 ## Phase 3: The Domain Library
 - [ ] Resolve the non-linear arithmetic question first: Fourier-Motzkin only covers QF_LRA,

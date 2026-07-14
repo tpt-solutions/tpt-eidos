@@ -1,0 +1,11 @@
+[package]
+name = "eidos-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Lowers the erased eidos computational core to a no_std Rust crate"
+
+[dependencies]
+eidos-erasure.workspace = true
+eidos-parser.workspace = true

@@ -10,3 +10,7 @@ publish = false
 [dependencies]
 eidos-parser.workspace = true
 eidos-kernel.workspace = true
+
+[dev-dependencies]
+eidos-erasure.workspace = true
+eidos-codegen.workspace = true

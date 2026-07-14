@@ -64,7 +64,11 @@ impl LinExpr {
     }
 
     pub fn scale(&self, s: f64) -> LinExpr {
-        let coeffs = self.coeffs.iter().map(|(k, v)| (k.clone(), v * s)).collect();
+        let coeffs = self
+            .coeffs
+            .iter()
+            .map(|(k, v)| (k.clone(), v * s))
+            .collect();
         LinExpr {
             coeffs,
             constant: self.constant * s,
@@ -194,7 +198,7 @@ fn fm_unsat(exprs: &Norm) -> bool {
     let mut next: Norm = rest;
     for (ue, us) in &uppers {
         for (le, ls) in &lowers {
-            let combined = ue.sub(le);
+            let combined = le.sub(ue);
             if *us || *ls {
                 next.push((Rel::Lt, combined));
             } else {
@@ -214,12 +218,22 @@ pub fn unsat(constraints: &[Constraint]) -> bool {
 /// Decide whether `premises` entails `conclusion`, i.e.
 /// `unsat(premises ∧ ¬conclusion)`.
 pub fn entails(premises: &[Constraint], conclusion: &Constraint) -> bool {
-    let mut cs: Vec<Constraint> = premises.to_vec();
-    cs.extend(negate(conclusion));
-    unsat(&cs)
+    match conclusion.rel {
+        Rel::Eq => {
+            let e = conclusion.e.clone();
+            let lt_c = Constraint::lt(e.clone());
+            let gt_c = Constraint::gt(e);
+            unsat(&append(premises, &lt_c)) && unsat(&append(premises, &gt_c))
+        }
+        _ => {
+            let mut cs: Vec<Constraint> = premises.to_vec();
+            cs.extend(negate(conclusion));
+            unsat(&cs)
+        }
+    }
 }
 
-/// Produce the negation of a constraint as a (conjunctive) set.
+/// Produce the negation of a constraint (single relation, non-Eq) as a set.
 fn negate(c: &Constraint) -> Vec<Constraint> {
     match c.rel {
         Rel::Le => vec![Constraint::gt(c.e.clone())],
@@ -228,6 +242,12 @@ fn negate(c: &Constraint) -> Vec<Constraint> {
         Rel::Gt => vec![Constraint::le(c.e.clone())],
         Rel::Eq => vec![Constraint::lt(c.e.clone()), Constraint::gt(c.e.clone())],
     }
+}
+
+fn append(premises: &[Constraint], extra: &Constraint) -> Vec<Constraint> {
+    let mut cs = premises.to_vec();
+    cs.push(extra.clone());
+    cs
 }
 
 /// Find a satisfying model of the constraint set, if one exists.
@@ -272,7 +292,7 @@ fn solve(exprs: &Norm) -> Option<BTreeMap<String, f64>> {
     let mut next: Norm = rest;
     for (ue, us) in &uppers {
         for (le, ls) in &lowers {
-            let combined = ue.sub(le);
+            let combined = le.sub(ue);
             if *us || *ls {
                 next.push((Rel::Lt, combined));
             } else {
@@ -299,11 +319,7 @@ fn solve(exprs: &Norm) -> Option<BTreeMap<String, f64>> {
     }
 
     let value = if upper_val.is_finite() && lower_val.is_finite() {
-        if upper_val - lower_val < EPS {
-            (upper_val + lower_val) / 2.0
-        } else {
-            (upper_val + lower_val) / 2.0
-        }
+        (upper_val + lower_val) / 2.0
     } else if upper_val.is_finite() {
         upper_val - 1.0
     } else if lower_val.is_finite() {
@@ -318,10 +334,27 @@ fn solve(exprs: &Norm) -> Option<BTreeMap<String, f64>> {
 /// Return a counterexample witnessing the failure of `entails(premises,
 /// conclusion)`: a model of `premises ∧ ¬conclusion`. `None` when the
 /// entailment actually holds.
-pub fn counterexample(premises: &[Constraint], conclusion: &Constraint) -> Option<BTreeMap<String, f64>> {
-    let mut cs: Vec<Constraint> = premises.to_vec();
-    cs.extend(negate(conclusion));
-    find_model(&cs)
+pub fn counterexample(
+    premises: &[Constraint],
+    conclusion: &Constraint,
+) -> Option<BTreeMap<String, f64>> {
+    match conclusion.rel {
+        Rel::Eq => {
+            let e = conclusion.e.clone();
+            if let Some(m) = find_model(&append(premises, &Constraint::lt(e.clone()))) {
+                return Some(m);
+            }
+            if let Some(m) = find_model(&append(premises, &Constraint::gt(e))) {
+                return Some(m);
+            }
+            None
+        }
+        _ => {
+            let mut cs: Vec<Constraint> = premises.to_vec();
+            cs.extend(negate(conclusion));
+            find_model(&cs)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -334,10 +367,7 @@ mod tests {
 
     #[test]
     fn unsat_trivial_contradiction() {
-        let cs = vec![
-            Constraint::le(v("x")),
-            Constraint::lt(v("x").neg()),
-        ];
+        let cs = vec![Constraint::le(v("x")), Constraint::lt(v("x").neg())];
         assert!(unsat(&cs));
     }
 
@@ -350,8 +380,8 @@ mod tests {
     #[test]
     fn entails_mag_positive_excludes_zero() {
         let premises = vec![Constraint::gt(v("mag"))];
-        let conc = Constraint::eq(v("mag"));
-        assert!(entails(&premises, &conc));
+        let cs = append(&premises, &Constraint::eq(v("mag")));
+        assert!(unsat(&cs), "mag > 0 must exclude mag == 0");
     }
 
     #[test]
@@ -362,11 +392,11 @@ mod tests {
     }
 
     #[test]
-    fn counterexample_reports_zero() {
+    fn counterexample_reports_nonzero() {
         let premises: Vec<Constraint> = vec![];
         let conc = Constraint::eq(v("mag"));
         let ce = counterexample(&premises, &conc).expect("must have a model");
-        assert!((ce["mag"]).abs() < EPS);
+        assert!((ce["mag"]).abs() > EPS, "witness must violate mag == 0");
     }
 
     #[test]

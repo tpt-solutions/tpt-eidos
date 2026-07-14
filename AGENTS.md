@@ -5,10 +5,11 @@ code (flight control, etc.). The compiler is a theorem prover: it refuses to emi
 code unless the program is a valid proof of its own correctness, then erases all
 proof terms for zero-cost extraction to `no_std` Rust.
 
-This repo currently implements **Phase 1: the Minimal Viable Kernel (MVK)** — the
-trusted refinement-type checker plus a transparent QF_LRA decision procedure. Later
-phases (erasure/codegen, flight-math domain library, AI proof synthesis) are
-directional and not yet built.
+This repo implements **Phase 1: the Minimal Viable Kernel (MVK)** — the
+trusted refinement-type checker plus a transparent QF_LRA decision procedure —
+and **Phase 2: the Eraser** — proof-term erasure to a computational core and
+codegen to `no_std` Rust. The remaining phases (flight-math domain library,
+AI proof synthesis) are still directional.
 
 ## Workspace layout
 
@@ -23,6 +24,8 @@ crates/
   eidos-kernel/          trusted refinement-subtyping typechecker,
                          division-by-zero safety, termination check
   eidos-cli/             `eidos check <file>` / `eidos build <file>`
+  eidos-erasure/        proof-term erasure to a computational-core IR
+  eidos-codegen/        lower erased IR to a `no_std` Rust crate
   eidos-tests/           integration tests over examples/
 examples/
   calibrate_gyro.eidos          spec §4 worked example (must verify)
@@ -33,7 +36,8 @@ examples/
 
 `source .eidos` → `eidos-parser` (AST) → `eidos-kernel` (typecheck + collect proof
 obligations) → `eidos-verifier` (discharge QF_LRA obligations) → accept/reject.
-Later: `eidos-erasure` → `eidos-codegen` → `no_std` Rust.
+`eidos build` then runs `eidos-erasure` (strip refinements/contracts/effects to a
+computational core) → `eidos-codegen` (emit `no_std` Rust: `lib.rs` + `Cargo.toml`).
 
 ## Invariants the kernel enforces (MVK scope)
 

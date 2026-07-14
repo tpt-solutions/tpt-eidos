@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //!   eidos check <file>              verify a `.eidos` source file
-//!   eidos build <file> --out-dir D  emit a `no_std` Rust crate (erasure stub; Phase 2)
+//!   eidos build <file> --out-dir D  emit a verified `no_std` Rust crate (erasure + codegen)
 
 use std::fs;
 use std::path::PathBuf;
@@ -34,6 +34,23 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
 
 fn usage() -> String {
     "usage:\n  eidos check <file>\n  eidos build <file> --out-dir <dir>".to_string()
+}
+
+/// Derive a valid Rust crate name from the source file path.
+fn crate_name(file: &str) -> String {
+    let base = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "eidos_out".into());
+    base.chars()
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn cmd_check(path: Option<&str>) -> Result<ExitCode, String> {
@@ -91,7 +108,10 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     let module = parse(&src).map_err(|e| format!("parse error: {e}"))?;
     let report = check(&module);
     if !report.ok() {
-        eprintln!("eidos: {}: REJECTED (refusing to emit unverified code)", file);
+        eprintln!(
+            "eidos: {}: REJECTED (refusing to emit unverified code)",
+            file
+        );
         for e in &report.errors {
             eprintln!("  error: {}", e.message);
         }
@@ -100,12 +120,19 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
 
     let dir = PathBuf::from(&out_dir);
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{out_dir}`: {e}"))?;
+    let core = eidos_erasure::erase(&module);
+    let rust = eidos_codegen::codegen(&core);
     let lib = dir.join("lib.rs");
-    let stub = "#![no_std]\n\
-// tpt-eidos erasure target (Phase 2).\n\
-// This module was verified by the eidos kernel; proof terms have been\n\
-// erased. Full computational-core codegen lands in Phase 2.\n";
-    fs::write(&lib, stub).map_err(|e| format!("cannot write `{:?}`: {e}", lib))?;
-    println!("eidos: {}: emitted verified crate skeleton to {}", file, out_dir);
+    fs::write(&lib, &rust).map_err(|e| format!("cannot write `{:?}`: {e}", lib))?;
+    let cargo = dir.join("Cargo.toml");
+    let cargo_toml = format!(
+        "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+        crate_name(file)
+    );
+    fs::write(&cargo, cargo_toml).map_err(|e| format!("cannot write `{:?}`: {e}", cargo))?;
+    println!(
+        "eidos: {}: emitted verified no_std crate to {} (lib.rs + Cargo.toml)",
+        file, out_dir
+    );
     Ok(ExitCode::SUCCESS)
 }

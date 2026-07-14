@@ -1,0 +1,10 @@
+[package]
+name = "eidos-erasure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Proof-term erasure for tpt-eidos: strip refinement witnesses from a kernel-checked module, producing a computational-core IR"
+
+[dependencies]
+eidos-parser.workspace = true
