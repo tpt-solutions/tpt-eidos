@@ -1,0 +1,78 @@
+Design Document: tpt-eidos
+Subtitle: The Essence of Correctness
+Brand: tpt-solutions
+Paradigm: Proof-Native, Dependently Typed, Total, Effect-Restricted Systems Language
+1. Executive Summary
+tpt-eidos is a programming language designed from first principles to make specific classes of runtime errors mathematically impossible to express. Unlike tpt-telos (which acts as a verification layer or approximation), tpt-eidos is a proof-native language. It unifies specification, implementation, and proof into a single artifact. Its compiler acts as a theorem prover: it will refuse to emit binary code unless the program constitutes a valid mathematical proof of its own correctness. Crucially, it features a zero-cost proof erasure pipeline, extracting highly optimized, predictable machine code (or Rust/C) suitable for safety-critical domains like flight control.
+2. Core Philosophy & Design Pillars
+A. The Curry-Howard Correspondence as First-Class Citizen
+Types are theorems; programs are proofs. You do not write code and then test it. You state a theorem (the type signature and contracts), and the compiler forces you to construct a valid proof (the implementation) before it compiles.
+B. Totality (Guaranteed Termination)
+Infinite loops and unbounded recursion are catastrophic in flight control. tpt-eidos enforces totality. Every function must be mathematically proven to terminate. This is achieved via structural recursion or explicit, compiler-checked termination metrics (e.g., a loop variable that strictly decreases and is bounded below by zero).
+C. Proof Erasure (The "Zero-Cost" Guarantee)
+Proofs are for the compiler, not the CPU. During compilation, tpt-eidos performs proof erasure. All logical scaffolding, dependent type witnesses, and proof terms are stripped away. The resulting emitted code (e.g., to Rust, C, or bare-metal assembly) contains only the computational core, guaranteeing zero runtime overhead from the verification process.
+D. Linear/Affine Types for State & Hardware
+To prevent race conditions, double-frees, or using stale sensor data, tpt-eidos uses linear types for critical resources. A hardware register lock, a specific sensor reading, or a memory buffer must be used exactly once. The compiler mathematically guarantees no aliasing or premature destruction.
+3. Architectural Components
+3.1. The Type System
+Dependent Types: Types can depend on values.
+Example: Array<f64, N> where N is a compile-time constant, preventing all buffer overflows by design.
+Refinement Types: Types constrained by logical predicates.
+Example: type PositiveFloat = { x: f64 | x > 0.0 }
+Effect Types: Functions are annotated with the effects they are allowed to have.
+Example: fn read_sensor() -> SensorData effects [IO, RealTime<2ms>]
+3.2. The Proof Kernel
+Transparent, Minimal Kernel: Unlike tools that rely on massive, opaque external SMT solvers (like Z3) for core logic, tpt-eidos features a micro-kernel (similar to Lean 4 or Coq) that is small enough to be manually audited or formally verified itself.
+Built-in Decision Procedures: For common domains (like the QF_LRA you explored in telos), the compiler has built-in, transparent solvers to automatically discharge routine proof obligations without user intervention.
+3.3. The Extraction Pipeline
+Parsing & Type Checking: Validates syntax and dependent types.
+Proof Checking: The kernel verifies all requires, ensures, and termination proofs.
+Erasure: Strips all proof terms.
+Code Generation: Emits deterministic, highly optimized code. For example, an eidos module can be compiled into a no_std Rust crate with #[inline(always)] hints, ready for DO-178C certification.
+4. Conceptual Syntax Example
+// 1. Define a refined type: A normalized 3D vector
+type NormalizedVector3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 }
+
+// 2. Define a function with strict preconditions, postconditions, and effect bounds
+fn calibrate_gyro(
+    raw_data: Array<f64, 3>, 
+    bias: Array<f64, 3>
+) -> NormalizedVector3 
+requires raw_data.len() == 3 && bias.len() == 3
+ensures |result| result.v.magnitude() <= 1.0
+effects [Pure, Termination] // Proves no side effects and guaranteed halt
+{
+    // The compiler will actively verify that this math 
+    // can never exceed a magnitude of 1.0, given the inputs.
+    let corrected = raw_data.zip(bias).map(|(r, b)| r - b);
+    let mag = corrected.magnitude();
+    
+    // A dependent type "proof" step: we must prove mag > 0 to divide
+    if mag > 0.0 {
+        return { v: corrected.map(|x| x / mag) } as NormalizedVector3;
+    } else {
+        return { v: [0.0, 0.0, 0.0] } as NormalizedVector3;
+    }
+}
+If the math in the if/else block could possibly result in a magnitude > 1.0, or if mag could be zero and cause a division error without being handled, the code will not compile.
+5. What tpt-eidos Can Achieve
+Eradication of Entire Error Classes: Mathematically guarantees the absence of null pointer dereferences, buffer overflows, data races, and unhandled state transitions.
+Provable Real-Time Bounds: By restricting effects and enforcing totality, it can provide strong guarantees about Worst-Case Execution Time (WCET), crucial for flight control loops.
+Dissimilar Redundancy with Mathematical Equivalence: You can write two entirely different implementations of a control law in eidos. The compiler can be tasked with proving that for all possible inputs, Output A == Output B, providing a mathematically rigorous form of dissimilar redundancy checking.
+Seamless, Safe FFI: It can generate safe, verified C/Rust headers and bindings, acting as the "trusted core" of a larger, less-strict system.
+6. Limitations & Trade-offs (The Reality Check)
+No system is without trade-offs. A proof-native language demands compromises:
+Steep Learning Curve: Writing code in tpt-eidos requires mathematical maturity. Developers must think like theorem provers. It is not a language for rapid, throwaway prototyping.
+Compilation Time: Proof checking is computationally expensive. Compile times will be significantly longer than Rust or Go, especially for complex mathematical proofs.
+The "Trusted Computing Base" (TCB) Boundary: While the logic is proven, the language must eventually interact with the physical world (e.g., reading a memory-mapped hardware register). The boundary where eidos touches raw hardware requires a "trusted" axiom. The language can prove the software is correct, but it cannot prove the hardware isn't experiencing a cosmic ray bit-flip (though it can prove the software will handle the error if detected).
+Non-Linear Arithmetic Limits: While linear arithmetic (QF_LRA) is decidable and fast, flight dynamics often involve non-linear math (trigonometry, quaternions). Proving properties about these requires either approximations (interval arithmetic) or highly specialized, computationally heavy solvers, which may limit automatic proof discharge.
+Ecosystem Maturity: On day one, there is no massive package registry. Standard libraries for math, linear algebra, and hardware abstraction must be built from scratch (though extraction to Rust mitigates this long-term).
+7. Strategic Roadmap: From telos to eidos
+You do not need to build this all at once. tpt-telos is the perfect incubator.
+Phase 1 (The Core Kernel): Extract the proof-checking logic from telos into a standalone, minimal micro-kernel. Focus purely on dependent types and totality checking for a tiny subset of the language.
+Phase 2 (The Eraser): Build the extraction pipeline. Prove that a simple, verified eidos function can be compiled into clean, zero-allocation Rust code.
+Phase 3 (The Domain Library): Build a tpt-eidos-flight-math standard library. Pre-prove common flight control operations (e.g., DCM to Quaternion conversion, PID bounds) so users don't have to prove them from scratch.
+Phase 4 (AI-Assisted Proof Synthesis): Reintroduce the LlmAgent concept from telos. Because the compiler is a strict gatekeeper, an AI can be used to suggest proof steps or implementations, and the eidos compiler will mathematically verify or reject them. This makes the steep learning curve manageable.
+Next Step for You
+If this architecture resonates, the most valuable next step is to define the Minimal Viable Kernel (MVK).
+Would you like to draft the formal grammar (e.g., in BNF or a Rust-based parser like chumsky or nom) for the core dependent type signature and the requires/ensures contract system? We can start by designing the exact syntax for a single, critical flight-control function (like a safe matrix inversion) and map out how the proof checker would validate it.
