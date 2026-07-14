@@ -1,0 +1,46 @@
+(* tpt-eidos MVK grammar (EBNF).
+   Whitespace and // line-comments are ignored by the lexer. *)
+
+module        = { item } ;
+item          = typeAlias | function ;
+typeAlias     = "type", ident, "=", type ;
+function      = "fn", ident, "(", [params] , ")", "->", type,
+                [requires], [ensures], [effects], "{", expr, [";"], "}" ;
+params        = ident, ":", type, { ",", ident, ":", type } ;
+requires      = "requires", expr ;
+ensures       = "ensures", "|", ident, "|", expr ;
+effects       = "effects", "[", ident, { ",", ident }, "]" ;
+
+(* Types *)
+type          = refineType | arrayType | namedType ;
+refineType    = "{", ident, ":", type, "|", expr, "}" ;
+arrayType     = "Array", "<", type, ",", integer, ">" ;
+namedType     = ident ;
+
+(* Expressions (precedence low -> high) *)
+expr          = letExpr | ifExpr | returnExpr | orExpr ;
+letExpr       = "let", ident, "=", expr, ";", expr ;
+ifExpr        = "if", expr, "{", expr, [";"], "}",
+                "else", "{", expr, [";"], "}" ;
+returnExpr    = "return", expr, [";"] ;
+orExpr        = andExpr, { "||", andExpr } ;
+andExpr       = cmpExpr, { "&&", cmpExpr } ;
+cmpExpr       = addExpr, [ ( "<" | ">" | "<=" | ">=" | "==" | "!=" ), addExpr ] ;
+addExpr       = mulExpr, { ( "+" | "-" ), mulExpr } ;
+mulExpr       = unaryExpr, { ( "*" | "/" | "%" ), unaryExpr } ;
+unaryExpr     = ( "-" | "!" ), unaryExpr | postfix ;
+postfix       = primary, { ".", ident, [ "(", [args], ")" ]
+                          | "(", [args], ")", "as", type } ;
+primary       = number | "true" | "false" | ident
+              | "[", [expr, { ",", expr }], "]"
+              | "{", [ident, ":", expr, { ",", ident, ":", expr }], "}"
+              | "(", expr, ")"
+              | lambda ;
+args          = expr, { ",", expr } ;
+lambda        = "|", lambdaParams, "|", expr ;
+lambdaParams  = ( "(" , ident, { ",", ident }, ")" | ident ),
+                { ",", ( "(" , ident, { ",", ident }, ")" | ident ) } ;
+
+ident         = letter, { letter | digit | "_" } ;
+number        = digit, { digit }, [ ".", digit, { digit } ] ;
+integer       = digit, { digit } ;

@@ -1,0 +1,20 @@
+// Same as calibrate_gyro.eidos, but MISSING the `mag > 0.0` guard.
+// The kernel must reject this because `corrected.map(|x| x / mag)` divides by
+// `mag`, which is not provably non-zero here.
+
+type NormalizedVector3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };
+
+fn calibrate_gyro_broken(
+    raw_data: Array<f64, 3>,
+    bias: Array<f64, 3>
+) -> NormalizedVector3
+    requires raw_data.len() == 3 && bias.len() == 3
+    ensures |result| result.v.magnitude() <= 1.0
+    effects [Pure, Termination]
+{
+    let corrected = raw_data.zip(bias).map(|(r, b)| r - b);
+    let mag = corrected.magnitude();
+
+    // BUG: no guard proving mag > 0, so `x / mag` may divide by zero.
+    return { v: corrected.map(|x| x / mag) } as NormalizedVector3;
+}

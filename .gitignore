@@ -1,4 +1,6 @@
 /target
-/gen
-/gen-project
-/ejected
+Cargo.lock
+**/*.rs.bk
+.idea/
+.vscode/
+*.swp

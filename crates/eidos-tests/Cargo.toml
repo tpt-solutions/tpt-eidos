@@ -1,0 +1,12 @@
+[package]
+name = "eidos-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Integration tests for tpt-eidos over the worked examples"
+publish = false
+
+[dependencies]
+eidos-parser.workspace = true
+eidos-kernel.workspace = true

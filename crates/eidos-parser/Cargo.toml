@@ -1,0 +1,9 @@
+[package]
+name = "eidos-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Lexer, AST, and recursive-descent parser for the tpt-eidos language"
+
+[dependencies]
