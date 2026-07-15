@@ -99,110 +99,117 @@ and satisfies every example in the spec, so it's a realistic first target even t
 later phases stay directional until Phase 1-2 are real.
 
 ## Phase 5: Hardening — full test coverage
-- [ ] `eidos-kernel`: add termination-checker tests — **currently zero tests exist for it,
+- [x] `eidos-kernel`: add termination-checker tests — **currently zero tests exist for it,
       positive or negative** — despite it being a headline MVK invariant. Cover: a valid
       structurally-decreasing recursive function (must accept), a non-decreasing self-call
       (must reject), and mutual recursion between two functions (currently unchecked).
-- [ ] `eidos-kernel`: add a test proving `a % b` is currently unguarded by division-safety
+- [x] `eidos-kernel`: add a test proving `a % b` is currently unguarded by division-safety
       checking (regression test for bug #1 below; flip to a positive test once fixed).
-- [ ] `eidos-kernel`: add tests for nested if/else path-constraint propagation, a
+- [x] `eidos-kernel`: add tests for nested if/else path-constraint propagation, a
       contradictory `requires` clause, and an isolated `Lemma`/`apply_to` test that doesn't
       go through `DEFAULT_LEMMAS`.
-- [ ] `eidos-kernel`: add a test for `let`-bound values not entering the proof context
+- [x] `eidos-kernel`: add a test for `let`-bound values not entering the proof context
       (regression test for bug #8).
-- [ ] `eidos-parser`: add tests that trigger each `ParseError` variant and assert on the
+- [x] `eidos-parser`: add tests that trigger each `ParseError` variant and assert on the
       message — today every parser test is a happy-path `.unwrap()`. Cover: unexpected EOF,
       unexpected token, invalid number literal.
-- [ ] `eidos-parser`: add tests for operator precedence/associativity, lambda/tuple
+- [x] `eidos-parser`: add tests for operator precedence/associativity, lambda/tuple
       patterns, and `effects [...]` parsing (a grammar feature named in `AGENTS.md` with no
       dedicated test), plus a direct test of the public `parse_expr` entry point.
-- [ ] `eidos-verifier`: either wire up `LinExpr::variables()` to something or remove it —
+- [x] `eidos-verifier`: either wire up `LinExpr::variables()` to something or remove it —
       it's currently dead code, never called anywhere in the workspace.
-- [ ] `eidos-verifier`: add tests with 3+ variables, degenerate/unbounded constraint
+- [x] `eidos-verifier`: add tests with 3+ variables, degenerate/unbounded constraint
       systems, and cases exercising the `EPS = 1e-9` boundary directly.
-- [ ] `eidos-erasure`/`eidos-codegen`: add a test using a refinement bind name other than
+- [x] `eidos-erasure`/`eidos-codegen`: add a test using a refinement bind name other than
       `"v"` (regression test for bug #9), a `.map`/`.zip` call with a missing argument
       (regression test for bug #10), a record literal not immediately wrapped in a `Cast`,
       and a field/function name colliding with a Rust keyword (regression test for #13).
-- [ ] `eidos-codegen`: add a test that actually **executes** generated code and asserts on
+- [x] `eidos-codegen`: add a test that actually **executes** generated code and asserts on
       the runtime result (e.g. `eidos_sqrt`/`eidos_magnitude` on known inputs, including
       extreme magnitudes — regression test for bug #11) — today coverage only checks that
       generated code compiles, never that it computes the right answer. Also add a
       non-finite float literal test (regression test for bug #12).
-- [ ] `eidos-cli`: add unit/E2E tests for no-args/usage, an unknown subcommand, a missing
+- [x] `eidos-cli`: add unit/E2E tests for no-args/usage, an unknown subcommand, a missing
       file path, missing `--out-dir`, and `crate_name`'s sanitization edge cases
       (regression test for bug #16).
-- [ ] `eidos-flight-math`: fix or rename `primitives_rejected_without_domain_env` — it
+- [x] `eidos-flight-math`: fix or rename `primitives_rejected_without_domain_env` — it
       doesn't currently test what its name claims (see notes). Add a negative test showing
       `lemma_triangle_for_add` accepts an obviously-false bound (regression test for bug
       #6), and a test of a malformed `extra` expression string reaching
       `suggest_and_verify`'s error path.
-- [ ] Add adversarial/negative example fixtures under `examples/`: a broken flight-math
+- [x] Add adversarial/negative example fixtures under `examples/`: a broken flight-math
       case, a recursive-but-non-terminating function, an `Array<T,N>` size mismatch, and an
       `effects [...]` example — every existing fixture today is a single-reason
       accept/reject case.
-- [ ] Wire up `cargo llvm-cov --workspace --fail-under-lines 75` in CI — already flagged in
+- [x] Wire up `cargo llvm-cov --workspace --fail-under-lines 75` in CI — already flagged in
       Phase 1 as a stretch goal "not wired into CI yet."
-- [ ] **Open question:** add property-based/fuzz-style tests for the parser (arbitrary
-      strings must never panic/hang) and the verifier (arbitrary constraint systems must
-      terminate) — directly relevant to bugs #3/#4. The "pure std, no external crates"
-      convention rules out `proptest`/`cargo-fuzz` as *regular* dependencies, but they could
-      still be added as **dev-dependencies only** (test-only, never shipped in the trusted
-      binary). Needs a decision before scheduling this work.
+- [x] **Open question (resolved):** add property-based/fuzz-style tests for the parser
+       (arbitrary strings must never panic/hang) and the verifier (arbitrary constraint
+       systems must terminate) — directly relevant to bugs #3/#4. **Decision:** implement as
+       **dependency-free, pure-`std` fuzz harnesses** (a small deterministic xorshift PRNG,
+       no `proptest`/`cargo-fuzz` even as dev-deps) so the TCB and the dev-tooling stay
+       external-crate-free and CI stays offline. Added `crates/eidos-parser/tests/fuzz.rs`
+       (4000 random sources + adversarial deep-paren/unary/unterminated cases) and
+       `crates/eidos-verifier/tests/fuzz.rs` (random constraint systems, degenerate cases,
+       a guard-stress case). These also **caught a real regression**: the `MAX_CONSTRAINTS`
+       guard was checked *after* building the next constraint set, so an adversarial system
+       could allocate hundreds of millions of constraints before the guard fired; fixed by
+       bailing *before* the `uppers.len() * lowers.len()` construction in both `fm_unsat`
+       and `solve`.
 
 ## Known bugs / soundness gaps
-- [ ] **[High]** `%` (modulo) is completely exempt from division-safety checking —
+- [x] **[High]** `%` (modulo) is completely exempt from division-safety checking —
       `eidos-kernel/src/lib.rs:179-184` only calls `check_division` for `BinOp::Div`, never
       for `BinOp::Rem`. `x % y` with an unguarded `y` verifies with zero obligations.
-- [ ] **[High]** Termination checker is nearly decorative —
+- [x] **[High]** Termination checker is nearly decorative —
       `eidos-kernel/src/lib.rs:560-580,624-626` only rejects a recursive call whose
       arguments are syntactically identical to the parameters; `f(a - 0.0)` or mutual
       recursion between two functions both pass today.
-- [ ] **[High]** Fourier-Motzkin elimination has no complexity/depth guard (DoS) —
+- [x] **[High]** Fourier-Motzkin elimination has no complexity/depth guard (DoS) —
       `eidos-verifier/src/lib.rs:166-211,259-332`; each elimination step can roughly square
       the constraint count, with no fuel limit, on a decision procedure invoked for every
       `requires`/`if`/division/`ensures` obligation derived from source text.
-- [ ] **[High/Medium-High]** Unbounded recursion depth in the parser (stack-overflow DoS) —
+- [x] **[High/Medium-High]** Unbounded recursion depth in the parser (stack-overflow DoS) —
       `eidos-parser/src/lib.rs`'s expression grammar has no depth counter anywhere
       (parens, unary chains, array/record literals, lambda bodies all recurse freely); the
       same pattern repeats in the kernel's `walk`/`subst`/`simplify`/`linearize`.
-- [ ] **[Medium-High]** The Phase-4 agent-proposal path
+- [x] **[Medium-High]** The Phase-4 agent-proposal path
       (`eidos-flight-math/src/prover.rs:40-85`) feeds an untrusted external string straight
       through `parse_expr` and `check_module_with`, inheriting the two DoS surfaces above by
       design, not just by malformed-file accident.
-- [ ] **[Medium]** `triangle_for_add` agent lemma admits an unconstrained bound —
+- [ ] **[Medium]** `triangle_for_add` agent lemma admits an unconstrained bound (regression test pinned in `eidos-flight-math`: `triangle_for_add_accepts_false_bound`; still unsound by design, gated behind the agent loop) —
       `eidos-flight-math/src/lib.rs:74-85` matches `(a+b).magnitude() <= K` for any `K` with
       zero side conditions checking `K >= |a| + |b|` — the one visible hole in "an
       agent-suggested proof step is never trusted without kernel approval."
 - [ ] **[Medium]** Fixed-epsilon floating point (`EPS = 1e-9`,
       `eidos-verifier/src/lib.rs:10`) is the sole soundness oracle for the trusted decision
       procedure; no exact rational arithmetic is used anywhere.
-- [ ] **[Medium]** `let`-bindings never enter the linear proof context —
+- [x] **[Medium]** `let`-bindings never enter the linear proof context —
       `eidos-kernel/src/lib.rs:197-200`; `let x = 5.0; return a / x;` spuriously fails to
       verify even though `x` is a manifest nonzero literal.
-- [ ] **[Medium]** Eraser hardcodes the refinement bind name `"v"` —
+- [x] **[Medium]** Eraser hardcodes the refinement bind name `"v"` —
       `eidos-erasure/src/lib.rs:368`; a record using any other bind name, not immediately
       wrapped in a `Cast`, produces invalid Rust from `gen_record`.
-- [ ] **[Medium]** `.map`/`.zip` with a missing argument breaks codegen two different bad
+- [x] **[Medium]** `.map`/`.zip` with a missing argument breaks codegen two different bad
       ways — `eidos-codegen/src/lib.rs:222` (`map`) panics the whole `eidos build` process;
       `zip` (`lines 230-233`) silently emits invalid Rust and reports success.
-- [ ] **[Medium]** `eidos_sqrt`'s fixed 32-iteration Newton method
+- [x] **[Medium]** `eidos_sqrt`'s fixed 32-iteration Newton method
       (`eidos-codegen/src/lib.rs` prelude) can be inaccurate for extreme magnitudes — a gap
       between what the kernel proves (exact real arithmetic) and what generated code
       actually computes at runtime.
-- [ ] **[Medium]** Non-finite float literals produce invalid Rust —
+- [x] **[Medium]** Non-finite float literals produce invalid Rust —
       `eidos-codegen/src/lib.rs:276-283` (`float_lit`) turns `inf`/`NaN` into `inf.0`/`NaN.0`.
-- [ ] **[Low-Medium]** No Rust-keyword escaping for emitted identifiers — codegen never
+- [x] **[Low-Medium]** No Rust-keyword escaping for emitted identifiers — codegen never
       uses `r#ident`, so a field/function named e.g. `loop` produces uncompilable Rust.
-- [ ] **[Medium]** `eidos build` unconditionally overwrites `--out-dir` contents —
+- [x] **[Medium]** `eidos build` unconditionally overwrites `--out-dir` contents —
       `eidos-cli/src/main.rs:121-132`; no `--force` gate, no check for pre-existing content.
-- [ ] **[Low]** Silent saturating cast for `Array<T, N>` length —
+- [x] **[Low]** Silent saturating cast for `Array<T, N>` length —
       `eidos-parser/src/lib.rs:351` (`n as u64`); `Array<f64, 1e30>` saturates to
       `u64::MAX` instead of erroring.
-- [ ] **[Low]** `crate_name` can emit an invalid Cargo package name —
+- [x] **[Low]** `crate_name` can emit an invalid Cargo package name —
       `eidos-cli/src/main.rs:40-54` for file stems that are all-non-alphanumeric or start
       with a digit.
-- [ ] **[Low]** `unreachable!()` relies on an unenforced invariant —
+- [ ] **[Low]** `unreachable!()` relies on an unenforced invariant (defensive: `Constraint::normalize` only ever emits `Le`/`Lt`, so these arms are unreachable in practice) —
       `eidos-verifier/src/lib.rs:172,265` assume only `Le`/`Lt` ever reach these arms, with
       no type-level guarantee.
 

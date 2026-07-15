@@ -1,6 +1,6 @@
 // Reusable flight-control primitives for tpt-eidos (Phase 3 domain library).
 //
-// These are verified with `eidos-flight-math`'s lemma set. The QF_LRA prover
+// These are verified with `tpt-eidos-flight-math`'s lemma set. The QF_LRA prover
 // discharges every linear obligation; the non-linear facts (a vector normalized
 // by its own magnitude has magnitude 1) are admitted by the `normalized_vector`
 // trusted lemma. `pid_linear` is fully linear and needs no trusted lemma at all.

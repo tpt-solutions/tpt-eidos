@@ -7,8 +7,8 @@
 //! A suggestion is never trusted blindly — the compiler mathematically verifies
 //! or rejects it.
 
-use eidos_kernel::{CheckError, Obligation, Report};
-use eidos_parser::{parse, parse_expr, BinOp, Expr, Fun, Item, Module};
+use tpt_eidos_kernel::{CheckError, Obligation, Report};
+use tpt_eidos_parser::{parse, parse_expr, BinOp, Expr, Fun, Item, Module};
 
 use super::{Lemma, AGENT_LEMMAS};
 
@@ -188,5 +188,26 @@ fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> SumB {
             .errors
             .iter()
             .any(|e| e.message.contains("unknown lemma")));
+    }
+
+    #[test]
+    fn malformed_extra_expr_reaches_error_path() {
+        // A malformed `extra` expression must be reported via the outcome error
+        // path, never panic or silently apply.
+        let src = "fn div(x: f64) -> f64 { return x / x; }";
+        let out = suggest_and_verify(
+            src,
+            &[ProofStep::StrengthenRequires {
+                fn_name: "div".into(),
+                extra: "1 + * 2".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(!out[0].accepted);
+        assert!(out[0]
+            .errors
+            .iter()
+            .any(|e| e.message.contains("bad step expression")));
     }
 }

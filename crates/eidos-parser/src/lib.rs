@@ -176,11 +176,26 @@ impl Lexer {
 struct Parser {
     toks: Vec<Tok>,
     pos: usize,
+    /// Recursion depth of the expression grammar. Bounds stack usage so a
+    /// deeply nested (or adversarial) source cannot stack-overflow the parser.
+    depth: usize,
 }
+
+/// Maximum nesting depth the parser will accept before bailing with an error.
+/// This bounds stack usage so a deeply nested (or adversarial) source cannot
+/// stack-overflow the parser (bug #4). Each surface nesting level expands to
+/// several stack frames in the recursive-descent chain, so the limit is kept
+/// deliberately small — far deeper than any legitimate eidos program needs,
+/// yet safely within the default thread stack.
+const MAX_PARSE_DEPTH: usize = 64;
 
 impl Parser {
     fn new(toks: Vec<Tok>) -> Self {
-        Parser { toks, pos: 0 }
+        Parser {
+            toks,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn peek(&self) -> Option<&Tok> {
@@ -343,9 +358,9 @@ impl Parser {
             self.eat(&Tok::Comma)?;
             let n = match self.advance() {
                 Some(Tok::Num(n)) => {
-                    if n.fract() != 0.0 {
+                    if !n.is_finite() || n.fract() != 0.0 || n < 0.0 || n > u64::MAX as f64 {
                         return Err(ParseError::Message(
-                            "Array length must be an integer".into(),
+                            "Array length must be a non-negative integer in range".into(),
                         ));
                     }
                     n as u64
@@ -374,7 +389,14 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_let_if_return()
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            self.depth -= 1;
+            return Err(ParseError::Message("maximum parse depth exceeded".into()));
+        }
+        let r = self.parse_let_if_return();
+        self.depth -= 1;
+        r
     }
 
     fn parse_let_if_return(&mut self) -> Result<Expr, ParseError> {
@@ -765,5 +787,153 @@ mod tests {
         let src = "fn f(a: f64) -> f64 requires a > 0.0 { return a / a; }";
         let m = parse(src).unwrap();
         assert!(matches!(m.items[0], Item::Fn(_)));
+    }
+
+    // --- ParseError variant coverage (every variant, asserting on message). ---
+
+    #[test]
+    fn error_unexpected_eof() {
+        let e = parse("fn f(a: f64").unwrap_err();
+        assert_eq!(e, ParseError::UnexpectedEof);
+        assert!(e.to_string().contains("end of input"));
+    }
+
+    #[test]
+    fn error_unexpected_token() {
+        let e = parse("fn f() -> f64 { return 1 + * 2; }").unwrap_err();
+        assert!(matches!(e, ParseError::UnexpectedToken(_)));
+        assert!(e.to_string().contains("unexpected token"));
+    }
+
+    #[test]
+    fn error_invalid_number() {
+        let e = parse("fn f() -> f64 { return 1.2.3; }").unwrap_err();
+        assert_eq!(e, ParseError::InvalidNumber("1.2.3".into()));
+        assert!(e.to_string().contains("invalid number literal"));
+    }
+
+    #[test]
+    fn error_array_length_out_of_range() {
+        // A length that would saturate `as u64` must be rejected, not silently
+        // turned into `u64::MAX` (bug #15). The lexer reads this as a single
+        // numeric literal well above `u64::MAX`.
+        let e = parse("type T = Array<f64, 200000000000000000000>;").unwrap_err();
+        assert!(e.to_string().contains("Array length"), "got: {e}");
+    }
+
+    // --- Operator precedence / associativity. ---
+
+    #[test]
+    fn precedence_mul_over_add() {
+        let m = parse("fn f() -> f64 { return 1.0 + 2.0 * 3.0; }").unwrap();
+        if let Item::Fn(f) = &m.items[0] {
+            if let Expr::Return(e) = &f.body {
+                if let Expr::Bin { op, b, .. } = e.as_ref() {
+                    assert_eq!(*op, BinOp::Add);
+                    assert!(matches!(b.as_ref(), Expr::Bin { op: BinOp::Mul, .. }));
+                    return;
+                }
+            }
+        }
+        panic!("expected (1 + (2 * 3))");
+    }
+
+    #[test]
+    fn precedence_not_over_eq() {
+        let m = parse("fn f() -> bool { return ! a == b; }").unwrap();
+        if let Item::Fn(f) = &m.items[0] {
+            if let Expr::Return(e) = &f.body {
+                if let Expr::Bin { op, a, .. } = e.as_ref() {
+                    assert_eq!(*op, BinOp::Eq);
+                    assert!(matches!(a.as_ref(), Expr::Un { op: UnOp::Not, .. }));
+                    return;
+                }
+            }
+        }
+        panic!("expected ((!a) == b)");
+    }
+
+    #[test]
+    fn add_is_left_associative() {
+        let m = parse("fn f() -> f64 { return 1.0 - 2.0 - 3.0; }").unwrap();
+        if let Item::Fn(f) = &m.items[0] {
+            if let Expr::Return(e) = &f.body {
+                if let Expr::Bin { op, a, .. } = e.as_ref() {
+                    assert_eq!(*op, BinOp::Sub);
+                    assert!(matches!(a.as_ref(), Expr::Bin { op: BinOp::Sub, .. }));
+                    return;
+                }
+            }
+        }
+        panic!("expected ((1 - 2) - 3)");
+    }
+
+    // --- Lambda / tuple patterns. ---
+
+    #[test]
+    fn parses_lambda_with_tuple_pattern() {
+        let e = parse_expr("|(a, b)| a + b").unwrap();
+        match e {
+            Expr::Lambda { params, .. } => {
+                assert_eq!(
+                    params,
+                    vec![Pattern::Tuple(vec![
+                        Pattern::Var("a".into()),
+                        Pattern::Var("b".into())
+                    ])]
+                );
+            }
+            other => panic!("expected lambda, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nested_tuple_param_pattern() {
+        let e = parse_expr("|(a, (b, c))| a + b + c").unwrap();
+        match e {
+            Expr::Lambda { params, .. } => assert_eq!(
+                params,
+                vec![Pattern::Tuple(vec![
+                    Pattern::Var("a".into()),
+                    Pattern::Tuple(vec![Pattern::Var("b".into()), Pattern::Var("c".into())])
+                ])]
+            ),
+            other => panic!("expected lambda, got {other:?}"),
+        }
+    }
+
+    // --- effects [...] parsing. ---
+
+    #[test]
+    fn parses_effects_list() {
+        let m = parse("fn f() -> f64 effects [Pure, IO] { return 1.0; }").unwrap();
+        match &m.items[0] {
+            Item::Fn(f) => assert_eq!(f.effects, vec!["Pure".to_string(), "IO".to_string()]),
+            other => panic!("expected fn, got {other:?}"),
+        }
+    }
+
+    // --- Direct parse_expr entry point. ---
+
+    #[test]
+    fn parse_expr_entry_point() {
+        let e = parse_expr("1.0 + 2.0").unwrap();
+        match e {
+            Expr::Bin { op, .. } => assert_eq!(op, BinOp::Add),
+            other => panic!("expected bin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_expr_rejects_non_expression() {
+        assert!(parse_expr("fn f() -> f64 { return 1.0; }").is_err());
+    }
+
+    #[test]
+    fn rejects_deeply_nested_expression() {
+        // A pathological nesting must fail instead of stack-overflowing the
+        // parser (DoS guard, bug #4).
+        let nested = format!("{}{}{}", "(".repeat(2000), "1.0", ")".repeat(2000));
+        assert!(parse_expr(&nested).is_err());
     }
 }

@@ -15,8 +15,8 @@ mod prover;
 
 pub use prover::{suggest_and_verify, ProofStep, SuggestOutcome};
 
-use eidos_kernel::{check_with, Lemma, Report, DEFAULT_LEMMAS};
-use eidos_parser::{parse, BinOp, Expr, Module};
+use tpt_eidos_kernel::{check_with, Lemma, Report, DEFAULT_LEMMAS};
+use tpt_eidos_parser::{parse, BinOp, Expr, Module};
 
 /// The reusable flight-control primitives, as eidos source. Feed this to
 /// `parse` and `check_module` to confirm the domain library verifies.
@@ -62,7 +62,7 @@ pub fn check_module_with(module: &Module, extra: &[Lemma]) -> Report {
 }
 
 /// Parse and verify a flight-control eidos source string.
-pub fn check_source(src: &str) -> Result<Report, eidos_parser::ParseError> {
+pub fn check_source(src: &str) -> Result<Report, tpt_eidos_parser::ParseError> {
     let module = parse(src)?;
     Ok(check_module(&module))
 }
@@ -102,7 +102,7 @@ fn is_elementwise_sum(e: &Expr) -> bool {
 
 // `Constraint` appears in the lemma signatures even when a lemma admits with no
 // side conditions.
-use eidos_verifier::Constraint;
+use tpt_eidos_verifier::Constraint;
 
 #[cfg(test)]
 mod tests {
@@ -115,10 +115,13 @@ mod tests {
     }
 
     #[test]
-    fn primitives_rejected_without_domain_env() {
-        // The same primitives must not verify under the bare kernel default set
-        // when a non-linear obligation cannot be matched; here we just confirm
-        // `check_module` (the domain environment) is the entry point used.
+    fn primitives_verify_under_domain_env() {
+        // The flight-control primitives verify under the standard domain
+        // environment (`check_module`). (The old name
+        // `primitives_rejected_without_domain_env` was misleading: the domain
+        // lemma set `FLIGHT_LEMMAS` is currently empty, so the domain
+        // environment and the bare kernel differ only by the agent-gated
+        // `AGENT_LEMMAS`, which are *not* on by default.)
         let module = parse(PRIMITIVES_EIDOS).expect("parse primitives");
         let r = check_module(&module);
         assert!(
@@ -128,13 +131,40 @@ mod tests {
         );
     }
 
+    // --- Bug #6: `triangle_for_add` admits any bound `K`, even a false one. ---
+    // This is a *documentation* regression test: it pins the current (unsound)
+    // behaviour so any future tightening of the lemma is forced to update it.
+    #[test]
+    fn triangle_for_add_accepts_false_bound() {
+        // `s` is an elementwise sum whose magnitude is clearly not `<= 0.0`, yet
+        // the refinement demands `s.magnitude() <= 0.0`. With the agent lemma
+        // on, the kernel still accepts — `triangle_for_add` never checks that
+        // `K >= |a| + |b|` (bug #6).
+        let src = "type Zero = { s: Array<f64, 3> | s.magnitude() <= 0.0 };
+fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> Zero {
+    return { s: a.zip(b).map(|(x, y)| x + y) } as Zero;
+}";
+        let module = parse(src).expect("parse");
+        let r = check_module_with(&module, AGENT_LEMMAS);
+        assert!(
+            r.ok(),
+            "bug #6: triangle_for_add wrongly admits a false bound (should be unsound today)"
+        );
+        assert!(
+            r.obligations
+                .iter()
+                .any(|o| matches!(o.status, tpt_eidos_kernel::ObligationStatus::Trusted)),
+            "the false obligation was discharged by a trusted lemma"
+        );
+    }
+
     #[test]
     fn primitives_emit_no_std_rust() {
         let module = parse(PRIMITIVES_EIDOS).expect("parse primitives");
         let report = check_module(&module);
         assert!(report.ok(), "primitives rejected: {:?}", report.errors);
-        let core = eidos_erasure::erase(&module);
-        let rust = eidos_codegen::codegen(&core);
+        let core = tpt_eidos_erasure::erase(&module);
+        let rust = tpt_eidos_codegen::codegen(&core).expect("codegen");
         assert!(rust.contains("#![no_std]"));
         assert!(rust.contains("pub fn quat_normalize"));
         assert!(rust.contains("pub fn pid_linear"));

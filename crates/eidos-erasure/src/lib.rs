@@ -4,7 +4,7 @@
 //! only to satisfy the type system — refinement predicates, `as` casts,
 //! `requires`/`ensures` contracts, and `effects` labels — leaving a
 //! *computational core* that preserves the exact runtime behaviour of the
-//! source. This core is what `eidos-codegen` lowers to `no_std` Rust.
+//! source. This core is what `tpt-eidos-codegen` lowers to `no_std` Rust.
 //!
 //! Erasure is total and type-directed: every surface `Expr` is rewritten to a
 //! `CExpr` annotated with its erased `CoreType`, so the code generator never
@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
+use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
 
 /// A type with all refinement information stripped.
 #[derive(Clone, Debug, PartialEq)]
@@ -365,10 +365,19 @@ impl<'a> Eraser<'a> {
                 let mut ty = CoreType::Base("_".into());
                 for (fnm, fv) in fields {
                     let c = self.erase_expr(fv, env);
-                    if fnm == "v" {
-                        ty = c.ty.clone();
-                    }
                     cf.push((fnm.clone(), c));
+                }
+                // If this record is a refinement witness for a known struct, tag
+                // it with that struct's name so codegen emits a proper struct
+                // literal. This works for *any* bind name, not just "v" (bug #9).
+                if let Some(s) = self.structs.iter().find(|s| {
+                    s.fields.len() == fields.len()
+                        && s.fields
+                            .iter()
+                            .zip(fields.iter())
+                            .all(|(sf, (fnm, _))| sf.0.as_str() == fnm.as_str())
+                }) {
+                    ty = CoreType::Named(s.name.clone());
                 }
                 CExpr {
                     ty,
@@ -418,7 +427,7 @@ impl<'a> Eraser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eidos_parser::parse;
+    use tpt_eidos_parser::parse;
 
     fn erase_src(src: &str) -> CoreModule {
         let m = parse(src).expect("parse");

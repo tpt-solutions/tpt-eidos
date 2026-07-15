@@ -1,5 +1,5 @@
 [package]
-name = "eidos-tests"
+name = "tpt-eidos-tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,10 +8,10 @@ description = "Integration tests for tpt-eidos over the worked examples"
 publish = false
 
 [dependencies]
-eidos-parser.workspace = true
-eidos-kernel.workspace = true
+tpt-eidos-parser.workspace = true
+tpt-eidos-kernel.workspace = true
 
 [dev-dependencies]
-eidos-erasure.workspace = true
-eidos-codegen.workspace = true
-eidos-flight-math.workspace = true
+tpt-eidos-erasure.workspace = true
+tpt-eidos-codegen.workspace = true
+tpt-eidos-flight-math.workspace = true

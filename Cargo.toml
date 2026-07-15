@@ -16,14 +16,20 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 rust-version = "1.74"
+authors = ["The tpt-eidos contributors"]
+repository = "https://github.com/tpt-solutions/tpt-eidos"
+homepage = "https://github.com/tpt-solutions/tpt-eidos"
+readme = "README.md"
+keywords = ["refinement-types", "verification", "proof", "no-std", "dependently-typed"]
+categories = ["compilers", "command-line-utilities", "mathematics", "embedded", "science"]
 
 [workspace.dependencies]
-eidos-verifier = { path = "crates/eidos-verifier" }
-eidos-parser = { path = "crates/eidos-parser" }
-eidos-kernel = { path = "crates/eidos-kernel" }
-eidos-erasure = { path = "crates/eidos-erasure" }
-eidos-codegen = { path = "crates/eidos-codegen" }
-eidos-flight-math = { path = "crates/eidos-flight-math" }
+tpt-eidos-verifier = { path = "crates/eidos-verifier", version = "0.1.0" }
+tpt-eidos-parser = { path = "crates/eidos-parser", version = "0.1.0" }
+tpt-eidos-kernel = { path = "crates/eidos-kernel", version = "0.1.0" }
+tpt-eidos-erasure = { path = "crates/eidos-erasure", version = "0.1.0" }
+tpt-eidos-codegen = { path = "crates/eidos-codegen", version = "0.1.0" }
+tpt-eidos-flight-math = { path = "crates/eidos-flight-math", version = "0.1.0" }
 
 [profile.release]
 opt-level = 3

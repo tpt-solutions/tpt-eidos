@@ -1,0 +1,10 @@
+// Adversarial fixture: a recursive function whose self-call does NOT decrease
+// its argument. It must be REJECTED by the kernel's termination checker.
+
+fn countdown(n: f64) -> f64 {
+    if n > 0.0 {
+        return countdown(n + 1.0);
+    } else {
+        return 0.0;
+    }
+}

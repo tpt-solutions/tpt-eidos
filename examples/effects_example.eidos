@@ -1,0 +1,12 @@
+// Fixture: a function carrying `effects [...]` metadata. Effect labels are
+// descriptive in the MVK and must not change verification; this module must be
+// ACCEPTED by `eidos check`.
+
+type Vec3 = Array<f64, 3>;
+
+fn scale_by(v: Vec3, k: f64) -> Vec3
+    requires k >= 0.0
+    effects [Pure, IO]
+{
+    return v.map(|x| x * k);
+}

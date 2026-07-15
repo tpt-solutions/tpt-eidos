@@ -1,9 +1,15 @@
 [package]
-name = "eidos-parser"
+name = "tpt-eidos-parser"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 description = "Lexer, AST, and recursive-descent parser for the tpt-eidos language"
 
 [dependencies]

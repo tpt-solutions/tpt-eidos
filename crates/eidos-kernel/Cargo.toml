@@ -1,11 +1,17 @@
 [package]
-name = "eidos-kernel"
+name = "tpt-eidos-kernel"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 description = "Trusted refinement-subtyping typechecker for tpt-eidos (MVK)"
 
 [dependencies]
-eidos-parser.workspace = true
-eidos-verifier.workspace = true
+tpt-eidos-parser.workspace = true
+tpt-eidos-verifier.workspace = true

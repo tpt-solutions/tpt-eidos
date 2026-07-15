@@ -1,5 +1,5 @@
 // A real flight-control control law written against the tpt-eidos domain
-// library (eidos-flight-math). It computes a commanded torque direction from
+// library (tpt-eidos-flight-math). It computes a commanded torque direction from
 // the attitude error between a measured and a reference unit vector, scaled by
 // a bounded gain, and returns a unit vector so downstream actuator saturation
 // cannot produce a magnitude > 1.

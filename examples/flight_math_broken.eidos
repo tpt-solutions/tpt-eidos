@@ -1,0 +1,12 @@
+// Adversarial fixture: a flight-control style normalization that is MISSING the
+// division-by-zero guard. It must be REJECTED by `eidos check` / `eidos build`
+// (the kernel proves the denominator could be zero).
+
+type Vec3 = Array<f64, 3>;
+type UnitVec3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };
+
+// Broken: divides by `mag` with no `mag > 0.0` proof.
+fn safe_direction_broken(raw: Vec3) -> UnitVec3 {
+    let mag = raw.magnitude();
+    return { v: raw.map(|x| x / mag) } as UnitVec3;
+}

@@ -9,6 +9,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const EPS: f64 = 1e-9;
 
+/// Soundness-preserving bound on the number of normalized constraints produced
+/// by a single Fourier-Motzkin elimination round. The elimination can roughly
+/// square the constraint count at each variable-elimination step, which is a
+/// denial-of-service vector when called once per `requires`/`if`/division/
+/// `ensures` obligation derived from source text. If a round would exceed this
+/// bound the solver bails out *toward satisfiability* (so `unsat` returns
+/// `false` and `solve`/`find_model` return `None`), which keeps the kernel's
+/// safety checks (division-by-zero, etc.) honest: a failed proof is conservatively
+/// treated as "unverified", never as "provably safe".
+const MAX_CONSTRAINTS: usize = 200_000;
+
 /// A linear expression `Σ cᵢ·xᵢ + k`. Variables are identified by name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinExpr {
@@ -73,15 +84,6 @@ impl LinExpr {
             coeffs,
             constant: self.constant * s,
         }
-    }
-
-    /// Variables that actually carry a non-zero coefficient.
-    pub fn variables(&self) -> Vec<String> {
-        self.coeffs
-            .iter()
-            .filter(|(_, v)| v.abs() > EPS)
-            .map(|(k, _)| k.clone())
-            .collect()
     }
 
     pub fn evaluate(&self, model: &BTreeMap<String, f64>) -> f64 {
@@ -195,6 +197,17 @@ fn fm_unsat(exprs: &Norm) -> bool {
         }
     }
 
+    // Fourier-Motzkin can produce `uppers.len() * lowers.len()` new
+    // constraints in a single round. That product is exactly the cost of the
+    // nested construction below, so check it *before* building `next`:
+    // otherwise an adversarial system would allocate hundreds of millions of
+    // constraints before the post-build guard could fire (the original DoS
+    // vector, bug #3). Bail toward satisfiable, which keeps safety checks
+    // conservative ("unverified", never "provably safe").
+    if rest.len() + uppers.len() * lowers.len() > MAX_CONSTRAINTS {
+        return false;
+    }
+
     let mut next: Norm = rest;
     for (ue, us) in &uppers {
         for (le, ls) in &lowers {
@@ -287,6 +300,13 @@ fn solve(exprs: &Norm) -> Option<BTreeMap<String, f64>> {
         } else {
             lowers.push((bound_expr, strict));
         }
+    }
+
+    // Same pre-construction bail as `fm_unsat`: the `uppers.len() *
+    // lowers.len()` product bounds the work about to be done, so check it
+    // before allocating (bug #3 DoS guard).
+    if rest.len() + uppers.len() * lowers.len() > MAX_CONSTRAINTS {
+        return None;
     }
 
     let mut next: Norm = rest;
@@ -410,5 +430,76 @@ mod tests {
         assert!(m["a"] > -EPS);
         assert!(m["a"] - m["b"] <= EPS);
         assert!(m["b"] - 1.0 <= EPS);
+    }
+
+    // --- Three-or-more variables, degenerate / unbounded systems, EPS edge. ---
+
+    #[test]
+    fn entails_with_three_variables() {
+        // x >= 0, y >= 0, z >= 0, x + y + z <= 1  |-  x <= 1
+        let premises = vec![
+            Constraint::ge(v("x")),
+            Constraint::ge(v("y")),
+            Constraint::ge(v("z")),
+            Constraint::le(
+                v("x")
+                    .add(&v("y"))
+                    .add(&v("z"))
+                    .sub(&LinExpr::constant(1.0)),
+            ),
+        ];
+        let conc = Constraint::le(v("x").sub(&LinExpr::constant(1.0)));
+        assert!(entails(&premises, &conc), "x is bounded by the sum");
+    }
+
+    #[test]
+    fn unsat_three_variable_cycle() {
+        // x < y, y < z, z < x  is a strict cycle -> unsatisfiable.
+        let cs = vec![
+            Constraint::lt(v("x").sub(&v("y"))),
+            Constraint::lt(v("y").sub(&v("z"))),
+            Constraint::lt(v("z").sub(&v("x"))),
+        ];
+        assert!(unsat(&cs), "strict cycle is unsatisfiable");
+    }
+
+    #[test]
+    fn degenerate_empty_system_is_sat() {
+        let cs: Vec<Constraint> = vec![];
+        assert!(!unsat(&cs), "the empty constraint system is satisfiable");
+        assert!(
+            find_model(&cs).is_some(),
+            "empty system has a (empty) model"
+        );
+    }
+
+    #[test]
+    fn unbounded_single_variable_is_sat() {
+        // A single free variable with no bounds is trivially satisfiable.
+        let cs = vec![Constraint::ge(v("x"))];
+        assert!(!unsat(&cs));
+        let m = find_model(&cs).expect("should be sat");
+        assert!(m["x"] >= -EPS);
+    }
+
+    #[test]
+    fn eps_boundary_lt_excludes_eps() {
+        // x < 0 strictly excludes x == EPS (= 1e-9) because EPS is positive.
+        let cs = vec![
+            Constraint::lt(v("x")),
+            Constraint::eq(v("x").sub(&LinExpr::constant(EPS))),
+        ];
+        assert!(unsat(&cs), "x < 0 must exclude x == EPS");
+    }
+
+    #[test]
+    fn eps_boundary_le_allows_eps() {
+        // x <= 0 with the non-strict relation keeps x == EPS within tolerance,
+        // so the system is satisfiable. This pins the fixed-epsilon behaviour.
+        let cs = vec![
+            Constraint::le(v("x")),
+            Constraint::eq(v("x").sub(&LinExpr::constant(EPS))),
+        ];
+        assert!(!unsat(&cs), "x <= 0 (non-strict) tolerates x == EPS");
     }
 }

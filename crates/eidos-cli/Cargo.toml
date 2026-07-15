@@ -1,9 +1,15 @@
 [package]
-name = "eidos-cli"
+name = "tpt-eidos-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 description = "Command-line entry point for tpt-eidos (eidos check / eidos build)"
 
 [[bin]]
@@ -11,8 +17,8 @@ name = "eidos"
 path = "src/main.rs"
 
 [dependencies]
-eidos-parser.workspace = true
-eidos-kernel.workspace = true
-eidos-erasure.workspace = true
-eidos-codegen.workspace = true
-eidos-flight-math.workspace = true
+tpt-eidos-parser.workspace = true
+tpt-eidos-kernel.workspace = true
+tpt-eidos-erasure.workspace = true
+tpt-eidos-codegen.workspace = true
+tpt-eidos-flight-math.workspace = true

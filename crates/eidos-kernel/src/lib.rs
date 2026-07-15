@@ -14,10 +14,10 @@
 //! * **Termination** — non-recursive functions pass; a recursive call that
 //!   passes its parameters unchanged (no decreasing metric) is rejected.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
-use eidos_verifier::{entails, unsat, Constraint, LinExpr, Rel};
+use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
+use tpt_eidos_verifier::{entails, unsat, Constraint, LinExpr, Rel};
 
 #[derive(Clone, Debug)]
 pub struct CheckError {
@@ -63,7 +63,7 @@ impl Report {
 ///
 /// Lemmas are the only non-linear escape hatch. They are named and recorded so
 /// every trusted obligation can be traced back to a specific, reviewable fact
-/// (see `Report::obligations` and `eidos-flight-math`).
+/// (see `Report::obligations` and `tpt-eidos-flight-math`).
 #[derive(Clone, Copy)]
 pub struct Lemma {
     pub name: &'static str,
@@ -77,7 +77,7 @@ impl Lemma {
     }
 }
 
-/// The lemmas the bare MVK ships with. Domain libraries (e.g. `eidos-flight-math`)
+/// The lemmas the bare MVK ships with. Domain libraries (e.g. `tpt-eidos-flight-math`)
 /// extend this set via `check_with`.
 pub static DEFAULT_LEMMAS: &[Lemma] = &[Lemma {
     name: "normalized_vector",
@@ -107,6 +107,7 @@ pub fn check_with(module: &Module, lemmas: &[Lemma]) -> Report {
             checker.check_fun(f, &mut report);
         }
     }
+    check_termination(module, &mut report);
     report
 }
 
@@ -147,7 +148,6 @@ impl<'a> Checker<'a> {
 
         let ctx = req_cs;
         self.walk(&f.body, &ctx, report);
-        self.check_termination(f, report);
     }
 
     fn resolve(&self, ty: &Type) -> Type {
@@ -168,6 +168,17 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Peel `Refine`/`Named` wrappers and return the declared element count of
+    /// an `Array<_, N>` type, if `ty` ultimately denotes a fixed-length array.
+    fn array_len_of(ty: &Type, aliases: &HashMap<String, Type>) -> Option<u64> {
+        match ty {
+            Type::Array(_, n) => Some(*n),
+            Type::Refine { ty, .. } => Self::array_len_of(ty, aliases),
+            Type::Named(n) => aliases.get(n).and_then(|t| Self::array_len_of(t, aliases)),
+            _ => None,
+        }
+    }
+
     fn walk(&self, e: &Expr, ctx: &[Constraint], report: &mut Report) {
         match e {
             Expr::Num(_) | Expr::Bool(_) | Expr::Var(_) => {}
@@ -180,7 +191,11 @@ impl<'a> Checker<'a> {
                 self.walk(a, ctx, report);
                 self.walk(b, ctx, report);
                 if matches!(op, BinOp::Div | BinOp::Rem) {
-                    let kind = if *op == BinOp::Div { "division" } else { "remainder" };
+                    let kind = if *op == BinOp::Div {
+                        "division"
+                    } else {
+                        "remainder"
+                    };
                     self.check_division(b, ctx, report, kind);
                 }
             }
@@ -195,9 +210,13 @@ impl<'a> Checker<'a> {
                 self.walk(then, &then_ctx, report);
                 self.walk(els, &else_ctx, report);
             }
-            Expr::Let { value, body, .. } => {
+            Expr::Let { name, value, body } => {
                 self.walk(value, ctx, report);
-                self.walk(body, ctx, report);
+                let mut body_ctx = ctx.to_vec();
+                if let Some(lv) = self.linearize(value) {
+                    body_ctx.push(Constraint::eq(LinExpr::var(name.clone()).sub(&lv)));
+                }
+                self.walk(body, &body_ctx, report);
             }
             Expr::Call { args, .. } => {
                 for a in args {
@@ -238,6 +257,23 @@ impl<'a> Checker<'a> {
             }
             Expr::Return(e) => {
                 self.walk(e, ctx, report);
+                // Array-length soundness: a manifest array literal returned for
+                // an `Array<_, N>` type must contain exactly `N` elements. This
+                // is the only place the kernel enforces element count today.
+                if let Expr::ArrayLit(es) = e.as_ref() {
+                    if let Some(n) = Self::array_len_of(&self.ret, self.aliases) {
+                        if (es.len() as u64) != n {
+                            report.errors.push(CheckError {
+                                message: format!(
+                                    "function `{}` returns an array of length {} but its type requires length {}",
+                                    self.current_fn,
+                                    es.len(),
+                                    n
+                                ),
+                            });
+                        }
+                    }
+                }
                 if self.as_refine(&self.ret).is_some() && !matches!(e.as_ref(), Expr::Cast { .. }) {
                     report.errors.push(CheckError {
                         message: format!(
@@ -261,8 +297,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_division(&self, denom: &Expr, ctx: &[Constraint], report: &mut Report) {
-        let desc = format!("division by zero: {} != 0", expr_to_string(denom));
+    fn check_division(&self, denom: &Expr, ctx: &[Constraint], report: &mut Report, kind: &str) {
+        let desc = format!("{kind} by zero: {} != 0", expr_to_string(denom));
         match self.linearize(denom) {
             Some(d) => {
                 let ob = Constraint::eq(d);
@@ -274,13 +310,13 @@ impl<'a> Checker<'a> {
                         status: ObligationStatus::Verified,
                     });
                 } else {
-                    let ce = eidos_verifier::find_model(&cs);
+                    let ce = tpt_eidos_verifier::find_model(&cs);
                     let detail = ce
                         .map(|m| format!("counterexample: {:?}", m))
                         .unwrap_or_default();
                     report.errors.push(CheckError {
                         message: format!(
-                            "possible division by zero: denominator could be zero. {detail}"
+                            "possible {kind} by zero: denominator could be zero. {detail}"
                         ),
                     });
                     report.obligations.push(Obligation {
@@ -292,7 +328,7 @@ impl<'a> Checker<'a> {
             None => {
                 report.errors.push(CheckError {
                     message: format!(
-                        "cannot prove denominator {} is non-zero (non-linear); division rejected",
+                        "cannot prove denominator {} is non-zero (non-linear); {kind} rejected",
                         expr_to_string(denom)
                     ),
                 });
@@ -557,73 +593,142 @@ impl<'a> Checker<'a> {
             _ => None,
         }
     }
+}
 
-    fn check_termination(&self, f: &Fun, report: &mut Report) {
-        let mut calls = Vec::new();
-        self.collect_self_calls(&f.body, &f.name, &mut calls);
-        for c in &calls {
-            if let Expr::Call { args, .. } = c {
-                let identical = f
-                    .params
+/// Module-level termination check. Builds a call graph over the functions in the
+/// module and rejects any recursive cycle (self- or mutual recursion) that lacks
+/// a well-founded metric: every recursive call must pass at least one argument
+/// that is strictly decreasing with respect to the corresponding formal
+/// parameter, provably under the linear prover (unconditionally).
+fn check_termination(module: &Module, report: &mut Report) {
+    let mut params_of: HashMap<String, Vec<String>> = HashMap::new();
+    let mut calls_of: HashMap<String, Vec<(String, Vec<Expr>)>> = HashMap::new();
+    let mut callees: HashMap<String, Vec<String>> = HashMap::new();
+
+    for it in &module.items {
+        if let Item::Fn(f) = it {
+            let pnames = f.params.iter().map(|(n, _)| n.clone()).collect();
+            params_of.insert(f.name.clone(), pnames);
+            let mut direct = Vec::new();
+            let mut adj = Vec::new();
+            collect_calls(&f.body, &mut direct, &mut adj);
+            calls_of.insert(f.name.clone(), direct);
+            callees.insert(f.name.clone(), adj);
+        }
+    }
+
+    for it in &module.items {
+        if let Item::Fn(f) = it {
+            let reach = reachable(&callees, &f.name);
+            if !reach.contains(&f.name) {
+                continue;
+            }
+            let mut bad = false;
+            for (callee, args) in &calls_of[&f.name] {
+                if !reach.contains(callee) {
+                    continue;
+                }
+                let cparams = match params_of.get(callee) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let decreases = args
                     .iter()
-                    .zip(args.iter())
-                    .all(|((pn, _), a)| self.is_param_ident(a, pn));
-                if identical {
-                    report.errors.push(CheckError {
-                        message: format!(
-                            "function `{}` may not terminate: recursive call passes unchanged arguments (no decreasing metric)",
-                            f.name
-                        ),
-                    });
+                    .zip(cparams.iter())
+                    .any(|(a, p)| expr_decreases(a, p));
+                if !decreases {
+                    bad = true;
+                    break;
+                }
+            }
+            if bad {
+                report.errors.push(CheckError {
+                    message: format!(
+                        "function `{}` may not terminate: a recursive call has no strictly-decreasing argument (no well-founded metric)",
+                        f.name
+                    ),
+                });
+            }
+        }
+    }
+}
+
+/// Collect every `Call` in `e`, recording `(callee, args)` pairs and the direct
+/// callee names (used to build the call graph).
+fn collect_calls(e: &Expr, out: &mut Vec<(String, Vec<Expr>)>, adj: &mut Vec<String>) {
+    match e {
+        Expr::Bin { a, b, .. } => {
+            collect_calls(a, out, adj);
+            collect_calls(b, out, adj);
+        }
+        Expr::Un { a, .. } => collect_calls(a, out, adj),
+        Expr::If { cond, then, els } => {
+            collect_calls(cond, out, adj);
+            collect_calls(then, out, adj);
+            collect_calls(els, out, adj);
+        }
+        Expr::Let { value, body, .. } => {
+            collect_calls(value, out, adj);
+            collect_calls(body, out, adj);
+        }
+        Expr::Call { func, args } => {
+            out.push((func.clone(), args.clone()));
+            if !adj.contains(func) {
+                adj.push(func.clone());
+            }
+            for a in args {
+                collect_calls(a, out, adj);
+            }
+        }
+        Expr::Method { recv, args, .. } => {
+            collect_calls(recv, out, adj);
+            for a in args {
+                collect_calls(a, out, adj);
+            }
+        }
+        Expr::Lambda { body, .. } => collect_calls(body, out, adj),
+        Expr::Record(fields) => {
+            for (_, v) in fields {
+                collect_calls(v, out, adj);
+            }
+        }
+        Expr::Cast { value, .. } => collect_calls(value, out, adj),
+        Expr::Return(e) => collect_calls(e, out, adj),
+        _ => {}
+    }
+}
+
+/// Set of all functions reachable (transitively) from `start`, including
+/// `start` itself.
+fn reachable(callees: &HashMap<String, Vec<String>>, start: &str) -> HashSet<String> {
+    let mut seen = HashSet::new();
+    let mut stack = vec![start.to_string()];
+    while let Some(n) = stack.pop() {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        if let Some(cs) = callees.get(&n) {
+            for c in cs {
+                if !seen.contains(c) {
+                    stack.push(c.clone());
                 }
             }
         }
     }
+    seen
+}
 
-    fn collect_self_calls<'b>(&self, e: &'b Expr, name: &str, out: &mut Vec<&'b Expr>) {
-        match e {
-            Expr::Bin { a, b, .. } => {
-                self.collect_self_calls(a, name, out);
-                self.collect_self_calls(b, name, out);
-            }
-            Expr::Un { a, .. } => self.collect_self_calls(a, name, out),
-            Expr::If { cond, then, els } => {
-                self.collect_self_calls(cond, name, out);
-                self.collect_self_calls(then, name, out);
-                self.collect_self_calls(els, name, out);
-            }
-            Expr::Let { value, body, .. } => {
-                self.collect_self_calls(value, name, out);
-                self.collect_self_calls(body, name, out);
-            }
-            Expr::Call { func, args } => {
-                if func == name {
-                    out.push(e);
-                }
-                for a in args {
-                    self.collect_self_calls(a, name, out);
-                }
-            }
-            Expr::Method { recv, args, .. } => {
-                self.collect_self_calls(recv, name, out);
-                for a in args {
-                    self.collect_self_calls(a, name, out);
-                }
-            }
-            Expr::Lambda { body, .. } => self.collect_self_calls(body, name, out),
-            Expr::Record(fields) => {
-                for (_, v) in fields {
-                    self.collect_self_calls(v, name, out);
-                }
-            }
-            Expr::Cast { value, .. } => self.collect_self_calls(value, name, out),
-            Expr::Return(e) => self.collect_self_calls(e, name, out),
-            _ => {}
+/// True iff `arg` is strictly smaller than the parameter named `param`,
+/// unconditionally provable from the linear arithmetic prover (e.g. `n - 1.0`
+/// is strictly smaller than `n`). Used as the well-founded metric for
+/// termination.
+fn expr_decreases(arg: &Expr, param: &str) -> bool {
+    match linearize(arg) {
+        Some(la) => {
+            let diff = la.sub(&LinExpr::var(param));
+            entails(&[], &Constraint::lt(diff))
         }
-    }
-
-    fn is_param_ident(&self, e: &Expr, p: &str) -> bool {
-        matches!(e, Expr::Var(v) if v == p)
+        None => false,
     }
 }
 
@@ -853,7 +958,7 @@ fn linearize(e: &Expr) -> Option<LinExpr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eidos_parser::parse;
+    use tpt_eidos_parser::{parse, parse_expr};
 
     fn check_src(src: &str) -> Report {
         let m = parse(src).expect("parse");
@@ -889,5 +994,127 @@ mod tests {
         }";
         let r = check_src(src);
         assert!(r.ok(), "errors: {:?}", r.errors);
+    }
+
+    // --- Bug #1: `%` (remainder) must also be guarded by division safety. ---
+
+    #[test]
+    fn rejects_unguarded_remainder() {
+        let src = "fn f(a: f64) -> f64 { return a % a; }";
+        let r = check_src(src);
+        assert!(!r.ok(), "expected rejection of unguarded remainder");
+        assert!(r
+            .errors
+            .iter()
+            .any(|e| e.message.contains("remainder by zero")));
+    }
+
+    #[test]
+    fn accepts_guarded_remainder() {
+        let src = "fn f(a: f64) -> f64 requires a > 0.0 {
+            if a > 0.0 { return a % a; } else { return 0.0; }
+        }";
+        let r = check_src(src);
+        assert!(r.ok(), "errors: {:?}", r.errors);
+    }
+
+    // --- Bug #8: `let`-bound manifest values must enter the proof context. ---
+
+    #[test]
+    fn let_bound_nonzero_enters_context() {
+        let src = "fn f(a: f64) -> f64 {
+            let x = 5.0;
+            return a / x;
+        }";
+        let r = check_src(src);
+        assert!(
+            r.ok(),
+            "let-bound 5.0 should prove the divisor non-zero: {:?}",
+            r.errors
+        );
+    }
+
+    #[test]
+    fn let_bound_zero_is_rejected() {
+        let src = "fn f(a: f64) -> f64 {
+            let x = 0.0;
+            return a / x;
+        }";
+        let r = check_src(src);
+        assert!(!r.ok(), "dividing by a let-bound 0 must be rejected");
+    }
+
+    // --- Bug #2: real termination checking (self + mutual recursion). ---
+
+    #[test]
+    fn accepts_structurally_decreasing_recursion() {
+        let src = "fn f(n: f64) -> f64 {
+            if n > 0.0 { return f(n - 1.0); } else { return 0.0; }
+        }";
+        let r = check_src(src);
+        assert!(
+            r.ok(),
+            "decreasing recursion should be accepted: {:?}",
+            r.errors
+        );
+    }
+
+    #[test]
+    fn rejects_non_decreasing_self_call() {
+        let src = "fn f(n: f64) -> f64 { return f(n + 1.0); }";
+        let r = check_src(src);
+        assert!(!r.ok(), "non-decreasing self call must be rejected");
+        assert!(r
+            .errors
+            .iter()
+            .any(|e| e.message.contains("may not terminate")));
+    }
+
+    #[test]
+    fn rejects_mutual_recursion() {
+        let src = "fn a(n: f64) -> f64 { return b(n); }
+        fn b(n: f64) -> f64 { return a(n); }";
+        let r = check_src(src);
+        assert!(!r.ok(), "mutual recursion must be rejected");
+    }
+
+    // --- Phase 5: path-constraint propagation, contradictory requires, lemma. ---
+
+    #[test]
+    fn if_else_propagates_path_constraints() {
+        let src = "fn f(a: f64) -> f64 requires a > 0.0 {
+            if a > 10.0 { return a / a; }
+            else { return a / a; }
+        }";
+        let r = check_src(src);
+        assert!(
+            r.ok(),
+            "both branches should inherit a > 0.0: {:?}",
+            r.errors
+        );
+    }
+
+    #[test]
+    fn contradictory_requires_is_rejected() {
+        let src = "fn f(a: f64) -> f64 requires a > 0.0 && a < 0.0 { return a; }";
+        let r = check_src(src);
+        assert!(!r.ok(), "contradictory requires must be rejected");
+        assert!(r.errors.iter().any(|e| e.message.contains("contradictory")));
+    }
+
+    #[test]
+    fn isolated_lemma_apply_to() {
+        let nv = Lemma {
+            name: "normalized_vector",
+            apply: lemma_normalized_vector,
+        };
+        let ctx: Vec<Constraint> = vec![];
+        let pred = parse_expr("[0.0, 0.0].magnitude() <= 1.0").unwrap();
+        let sides = nv.apply_to(&pred, &ctx);
+        assert!(
+            sides.is_some(),
+            "normalized_vector should match magnitude <= 1.0"
+        );
+        assert!(sides.unwrap().is_empty(), "no side conditions expected");
     }
 }

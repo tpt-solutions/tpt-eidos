@@ -1,17 +1,22 @@
 [package]
-name = "eidos-flight-math"
+name = "tpt-eidos-flight-math"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 description = "Pre-proved flight-control domain library for tpt-eidos (Phase 3)"
-publish = false
 
 [dependencies]
-eidos-kernel.workspace = true
-eidos-parser.workspace = true
-eidos-verifier.workspace = true
+tpt-eidos-kernel.workspace = true
+tpt-eidos-parser.workspace = true
+tpt-eidos-verifier.workspace = true
 
 [dev-dependencies]
-eidos-erasure.workspace = true
-eidos-codegen.workspace = true
+tpt-eidos-erasure.workspace = true
+tpt-eidos-codegen.workspace = true

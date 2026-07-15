@@ -4,18 +4,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use eidos_codegen::codegen;
-use eidos_erasure::erase;
-use eidos_flight_math::check_module;
-use eidos_kernel::{check, ObligationStatus};
-use eidos_parser::parse;
+use tpt_eidos_codegen::codegen;
+use tpt_eidos_erasure::erase;
+use tpt_eidos_flight_math::check_module;
+use tpt_eidos_kernel::{check, ObligationStatus};
+use tpt_eidos_parser::parse;
 
 fn example_path(name: &str) -> PathBuf {
     let dir = env!("CARGO_MANIFEST_DIR");
     PathBuf::from(format!("{dir}/../../examples/{name}"))
 }
 
-fn check_file(name: &str) -> eidos_kernel::Report {
+fn check_file(name: &str) -> tpt_eidos_kernel::Report {
     let src = fs::read_to_string(example_path(name)).unwrap_or_else(|e| panic!("read {name}: {e}"));
     let module = parse(&src).unwrap_or_else(|e| panic!("parse {name}: {e}"));
     check(&module)
@@ -32,7 +32,7 @@ fn codegen_file(name: &str) -> String {
         report.errors
     );
     let core = erase(&module);
-    codegen(&core)
+    codegen(&core).expect("codegen")
 }
 
 #[test]
@@ -75,8 +75,8 @@ fn build_emits_no_std_crate_without_kernel_types() {
     for leak in [
         "Refine",
         "Constraint",
-        "eidos_kernel",
-        "eidos_verifier",
+        "tpt_eidos_kernel",
+        "tpt_eidos_verifier",
         "Obligation",
     ] {
         assert!(!rust.contains(leak), "generated source leaked `{leak}`");
@@ -85,6 +85,60 @@ fn build_emits_no_std_crate_without_kernel_types() {
     assert!(rust.contains("pub fn calibrate_gyro"));
     assert!(rust.contains("pub struct NormalizedVector3"));
     assert!(rust.contains("eidos_map(eidos_zip("));
+}
+
+/// Adversarial fixtures: each is a single-reason accept/reject case.
+
+#[test]
+fn flight_math_broken_is_rejected() {
+    let src = fs::read_to_string(example_path("flight_math_broken.eidos"))
+        .unwrap_or_else(|e| panic!("read flight_math_broken: {e}"));
+    let module = parse(&src).unwrap_or_else(|e| panic!("parse flight_math_broken: {e}"));
+    let report = check_module(&module);
+    assert!(!report.ok(), "broken flight-math must be rejected");
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|e| e.message.contains("division by zero")),
+        "rejection should be the missing division-by-zero guard, errors: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn recursive_nonterminating_is_rejected() {
+    let report = check_file("recursive_nonterminating.eidos");
+    assert!(!report.ok(), "non-terminating recursion must be rejected");
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|e| e.message.contains("may not terminate")),
+        "rejection should be the termination check, errors: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn array_size_mismatch_is_rejected() {
+    let report = check_file("array_size_mismatch.eidos");
+    assert!(!report.ok(), "array size mismatch must be rejected");
+    assert!(
+        report.errors.iter().any(|e| e.message.contains("length")),
+        "rejection should be the array length mismatch, errors: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn effects_example_verifies() {
+    let report = check_file("effects_example.eidos");
+    assert!(
+        report.ok(),
+        "effects-labelled function should verify, errors: {:?}",
+        report.errors
+    );
 }
 
 /// The milestone for Phase 2: a verified eidos function must erasure-compile
@@ -151,9 +205,9 @@ fn attitude_control_emits_no_std_rust() {
     for leak in [
         "Refine",
         "Constraint",
-        "eidos_kernel",
-        "eidos_verifier",
-        "eidos_flight_math",
+        "tpt_eidos_kernel",
+        "tpt_eidos_verifier",
+        "tpt_eidos_flight_math",
         "Obligation",
     ] {
         assert!(!rust.contains(leak), "generated source leaked `{leak}`");
@@ -164,7 +218,7 @@ fn attitude_control_emits_no_std_rust() {
 /// rejected by the kernel — never trusted without kernel approval.
 #[test]
 fn proof_suggestion_accepted_and_rejected() {
-    use eidos_flight_math::{suggest_and_verify, ProofStep};
+    use tpt_eidos_flight_math::{suggest_and_verify, ProofStep};
 
     // A function that divides by its parameter with no guard: rejected.
     let src = "fn div(x: f64) -> f64 { return x / x; }";

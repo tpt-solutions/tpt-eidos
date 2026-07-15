@@ -1,0 +1,7 @@
+// Adversarial fixture: the body returns an array of length 2, but the declared
+// return type requires length 3. The kernel's array-length check must REJECT
+// this as a size mismatch.
+
+fn bad_length() -> Array<f64, 3> {
+    return [1.0, 2.0];
+}
