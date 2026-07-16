@@ -14,6 +14,8 @@
 //! decision procedure itself; `f64`/`EPS` only remain at the edges, for
 //! converting external literals in and reported model values back out.
 
+#![warn(missing_docs)]
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -210,11 +212,14 @@ use rat::Rat;
 /// A linear expression `Σ cᵢ·xᵢ + k`. Variables are identified by name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinExpr {
+    /// Coefficient of each named variable (absent = coefficient `0`).
     pub coeffs: BTreeMap<String, f64>,
+    /// The constant term `k`.
     pub constant: f64,
 }
 
 impl LinExpr {
+    /// The zero expression (`0`).
     pub fn zero() -> Self {
         LinExpr {
             coeffs: BTreeMap::new(),
@@ -222,6 +227,7 @@ impl LinExpr {
         }
     }
 
+    /// A single variable with coefficient `1`.
     pub fn var(name: impl Into<String>) -> Self {
         let mut coeffs = BTreeMap::new();
         coeffs.insert(name.into(), 1.0);
@@ -231,6 +237,7 @@ impl LinExpr {
         }
     }
 
+    /// A constant expression with no variables.
     pub fn constant(v: f64) -> Self {
         LinExpr {
             coeffs: BTreeMap::new(),
@@ -238,6 +245,7 @@ impl LinExpr {
         }
     }
 
+    /// Pointwise sum `self + other`.
     pub fn add(&self, other: &LinExpr) -> LinExpr {
         let mut coeffs = self.coeffs.clone();
         for (k, v) in &other.coeffs {
@@ -249,10 +257,12 @@ impl LinExpr {
         }
     }
 
+    /// Pointwise difference `self - other`.
     pub fn sub(&self, other: &LinExpr) -> LinExpr {
         self.add(&other.neg())
     }
 
+    /// Negation `-self`.
     pub fn neg(&self) -> LinExpr {
         let coeffs = self.coeffs.iter().map(|(k, v)| (k.clone(), -v)).collect();
         LinExpr {
@@ -261,6 +271,7 @@ impl LinExpr {
         }
     }
 
+    /// Scale every coefficient and the constant by `s`.
     pub fn scale(&self, s: f64) -> LinExpr {
         let coeffs = self
             .coeffs
@@ -273,6 +284,8 @@ impl LinExpr {
         }
     }
 
+    /// Evaluate the expression under a variable assignment (unassigned
+    /// variables default to `0`).
     pub fn evaluate(&self, model: &BTreeMap<String, f64>) -> f64 {
         let mut s = self.constant;
         for (k, v) in &self.coeffs {
@@ -285,33 +298,45 @@ impl LinExpr {
 /// Relations supported by the solver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rel {
+    /// `expr <= 0`
     Le,
+    /// `expr < 0`
     Lt,
+    /// `expr >= 0`
     Ge,
+    /// `expr > 0`
     Gt,
+    /// `expr == 0`
     Eq,
 }
 
 /// A single linear constraint `expr rel 0`.
 #[derive(Clone, Debug)]
 pub struct Constraint {
+    /// The relation the expression is compared against zero with.
     pub rel: Rel,
+    /// The left-hand-side linear expression.
     pub e: LinExpr,
 }
 
 impl Constraint {
+    /// Build `e <= 0`.
     pub fn le(e: LinExpr) -> Self {
         Constraint { rel: Rel::Le, e }
     }
+    /// Build `e < 0`.
     pub fn lt(e: LinExpr) -> Self {
         Constraint { rel: Rel::Lt, e }
     }
+    /// Build `e >= 0`.
     pub fn ge(e: LinExpr) -> Self {
         Constraint { rel: Rel::Ge, e }
     }
+    /// Build `e > 0`.
     pub fn gt(e: LinExpr) -> Self {
         Constraint { rel: Rel::Gt, e }
     }
+    /// Build `e == 0`.
     pub fn eq(e: LinExpr) -> Self {
         Constraint { rel: Rel::Eq, e }
     }

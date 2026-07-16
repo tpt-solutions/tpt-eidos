@@ -24,6 +24,30 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Package check
+        # `cargo package` resolves intra-workspace `path + version` deps
+        # against the real crates.io index, even with --no-verify — so a
+        # crate that depends on another not-yet-published workspace crate
+        # can't be fully packaged until publishing happens bottom-up. Fully
+        # package the two dependency-free leaves (catches metadata/tarball
+        # issues like an invalid `categories` entry); for the rest, `--list`
+        # at least catches file-layout/`include` misconfiguration without
+        # needing a registry round-trip.
+        run: |
+          set -e
+          for pkg in tpt-eidos-verifier tpt-eidos-parser; do
+            echo "packaging $pkg"
+            cargo package --no-verify -p "$pkg"
+          done
+          for pkg in \
+            tpt-eidos-kernel \
+            tpt-eidos-erasure \
+            tpt-eidos-codegen \
+            tpt-eidos-flight-math \
+            tpt-eidos-cli; do
+            echo "listing $pkg"
+            cargo package --list -p "$pkg"
+          done
 
   coverage:
     runs-on: ubuntu-latest
