@@ -11,6 +11,8 @@
 //! primitive definitions ([`PRIMITIVES_EIDOS`]) and a kernel-gated proof-step
 //! suggester ([`prover`]) for the Phase-4 AI-assist workflow.
 
+#![warn(missing_docs)]
+
 mod prover;
 
 pub use prover::{suggest_and_verify, ProofStep, SuggestOutcome};
@@ -62,6 +64,13 @@ pub fn check_module_with(module: &Module, extra: &[Lemma]) -> Report {
 }
 
 /// Parse and verify a flight-control eidos source string.
+///
+/// ```
+/// use tpt_eidos_flight_math::check_source;
+///
+/// let report = check_source("fn id(x: f64) -> f64 { x }").expect("parse");
+/// assert!(report.ok());
+/// ```
 pub fn check_source(src: &str) -> Result<Report, tpt_eidos_parser::ParseError> {
     let module = parse(src)?;
     Ok(check_module(&module))

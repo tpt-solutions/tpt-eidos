@@ -10,6 +10,8 @@
 //! `CExpr` annotated with its erased `CoreType`, so the code generator never
 //! has to re-derive types.
 
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 
 use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
@@ -30,75 +32,118 @@ pub enum CoreType {
 /// The field `x` carries the computational value of the refinement base `T`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructDef {
+    /// The generated struct name (matches the refinement type alias name).
     pub name: String,
+    /// Named fields as `(field_name, erased_type)` pairs.
     pub fields: Vec<(String, CoreType)>,
 }
 
+/// A typed expression in the erased computational core.
 #[derive(Clone, Debug)]
 pub struct CExpr {
+    /// The erased type of this expression.
     pub ty: CoreType,
+    /// The expression form.
     pub kind: CExprKind,
 }
 
+/// The form of a [`CExpr`] after proof-term erasure.
 #[derive(Clone, Debug)]
 pub enum CExprKind {
+    /// A numeric literal.
     Num(f64),
+    /// A boolean literal.
     Bool(bool),
+    /// A variable reference.
     Var(String),
+    /// `[e1, e2, ...]`
     ArrayLit(Vec<CExpr>),
+    /// Binary operator application.
     Bin {
+        /// The operator.
         op: BinOp,
+        /// Left operand.
         a: Box<CExpr>,
+        /// Right operand.
         b: Box<CExpr>,
     },
+    /// Unary operator application.
     Un {
+        /// The operator.
         op: UnOp,
+        /// Operand.
         a: Box<CExpr>,
     },
+    /// `if cond { then } else { els }`
     If {
+        /// Condition.
         cond: Box<CExpr>,
+        /// Then-branch.
         then: Box<CExpr>,
+        /// Else-branch.
         els: Box<CExpr>,
     },
+    /// `let name = value; body`
     Let {
+        /// Binding name.
         name: String,
+        /// Bound value.
         value: Box<CExpr>,
+        /// Body expression.
         body: Box<CExpr>,
     },
+    /// `func(args)`
     Call {
+        /// Callee name.
         func: String,
+        /// Arguments.
         args: Vec<CExpr>,
     },
     /// A method call `recv.name(args)` or a field projection `recv.name` when
     /// `args` is empty and the name is not a built-in helper.
     Method {
+        /// Receiver expression.
         recv: Box<CExpr>,
+        /// Method or field name.
         name: String,
+        /// Arguments (empty for field projections).
         args: Vec<CExpr>,
     },
     /// A closure `|params| body`, only ever emitted as a Rust closure inside a
     /// `map`/`zip` chain.
     Lambda {
+        /// Parameter patterns.
         params: Vec<Pattern>,
+        /// Body expression.
         body: Box<CExpr>,
     },
     /// A record literal. When its type is a generated struct it lowers to a
     /// struct literal; otherwise to an anonymous aggregate.
     Record(Vec<(String, CExpr)>),
+    /// `return e`
     Return(Box<CExpr>),
 }
 
+/// An erased function: parameters and return type have been stripped of
+/// refinements; the body contains only computational expressions.
 #[derive(Clone, Debug)]
 pub struct CoreFun {
+    /// The function name.
     pub name: String,
+    /// Parameter list as `(name, erased_type)` pairs.
     pub params: Vec<(String, CoreType)>,
+    /// Erased return type.
     pub ret: CoreType,
+    /// Function body after erasure.
     pub body: CExpr,
 }
 
+/// The erased form of a whole module: generated structs and erased functions.
 #[derive(Clone, Debug, Default)]
 pub struct CoreModule {
+    /// Generated structs from refinement type aliases.
     pub structs: Vec<StructDef>,
+    /// Erased function definitions.
     pub fns: Vec<CoreFun>,
 }
 

@@ -19,12 +19,11 @@ The grammar is documented in [`src/grammar.ebnf`](src/grammar.ebnf).
 ## Example
 
 ```rust
-use tpt_eidos_parser::{parse, ParseError};
+use tpt_eidos_parser::parse;
 
 let src = "fn id(x: f64) -> f64 { x }";
 let module = parse(src).expect("parse");
 assert_eq!(module.items.len(), 1);
-# let _ = ParseError::Unnamed; // keep the import used
 ```
 
 ## License

@@ -5,6 +5,8 @@
 //! stays auditable and CI stays offline). Exposes the four operations the
 //! kernel needs: `unsat`, `entails`, `model`, `counterexample`.
 
+#![warn(missing_docs)]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 const EPS: f64 = 1e-9;
@@ -23,11 +25,14 @@ const MAX_CONSTRAINTS: usize = 200_000;
 /// A linear expression `Σ cᵢ·xᵢ + k`. Variables are identified by name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinExpr {
+    /// Coefficient map: variable name → coefficient value.
     pub coeffs: BTreeMap<String, f64>,
+    /// Constant offset `k`.
     pub constant: f64,
 }
 
 impl LinExpr {
+    /// Constructs the zero expression `0`.
     pub fn zero() -> Self {
         LinExpr {
             coeffs: BTreeMap::new(),
@@ -35,6 +40,7 @@ impl LinExpr {
         }
     }
 
+    /// Constructs a single-variable expression `1·name`.
     pub fn var(name: impl Into<String>) -> Self {
         let mut coeffs = BTreeMap::new();
         coeffs.insert(name.into(), 1.0);
@@ -44,6 +50,7 @@ impl LinExpr {
         }
     }
 
+    /// Constructs a constant expression `v`.
     pub fn constant(v: f64) -> Self {
         LinExpr {
             coeffs: BTreeMap::new(),
@@ -51,6 +58,7 @@ impl LinExpr {
         }
     }
 
+    /// Returns `self + other`.
     pub fn add(&self, other: &LinExpr) -> LinExpr {
         let mut coeffs = self.coeffs.clone();
         for (k, v) in &other.coeffs {
@@ -62,10 +70,12 @@ impl LinExpr {
         }
     }
 
+    /// Returns `self - other`.
     pub fn sub(&self, other: &LinExpr) -> LinExpr {
         self.add(&other.neg())
     }
 
+    /// Returns the negation `-self`.
     pub fn neg(&self) -> LinExpr {
         let coeffs = self.coeffs.iter().map(|(k, v)| (k.clone(), -v)).collect();
         LinExpr {
@@ -74,6 +84,7 @@ impl LinExpr {
         }
     }
 
+    /// Returns `self * s`.
     pub fn scale(&self, s: f64) -> LinExpr {
         let coeffs = self
             .coeffs
@@ -86,6 +97,7 @@ impl LinExpr {
         }
     }
 
+    /// Evaluates the expression given a variable assignment.
     pub fn evaluate(&self, model: &BTreeMap<String, f64>) -> f64 {
         let mut s = self.constant;
         for (k, v) in &self.coeffs {
@@ -98,33 +110,45 @@ impl LinExpr {
 /// Relations supported by the solver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rel {
+    /// `≤`
     Le,
+    /// `<`
     Lt,
+    /// `≥`
     Ge,
+    /// `>`
     Gt,
+    /// `=`
     Eq,
 }
 
 /// A single linear constraint `expr rel 0`.
 #[derive(Clone, Debug)]
 pub struct Constraint {
+    /// The relation (e.g. `≤`, `<`, `=`).
     pub rel: Rel,
+    /// The left-hand-side linear expression; the right-hand side is always 0.
     pub e: LinExpr,
 }
 
 impl Constraint {
+    /// `e ≤ 0`
     pub fn le(e: LinExpr) -> Self {
         Constraint { rel: Rel::Le, e }
     }
+    /// `e < 0`
     pub fn lt(e: LinExpr) -> Self {
         Constraint { rel: Rel::Lt, e }
     }
+    /// `e ≥ 0`
     pub fn ge(e: LinExpr) -> Self {
         Constraint { rel: Rel::Ge, e }
     }
+    /// `e > 0`
     pub fn gt(e: LinExpr) -> Self {
         Constraint { rel: Rel::Gt, e }
     }
+    /// `e = 0`
     pub fn eq(e: LinExpr) -> Self {
         Constraint { rel: Rel::Eq, e }
     }
@@ -224,12 +248,33 @@ fn fm_unsat(exprs: &Norm) -> bool {
 }
 
 /// Decide whether a constraint set is unsatisfiable.
+///
+/// ```
+/// use tpt_eidos_verifier::{Constraint, LinExpr, unsat};
+///
+/// // x > 0 and x <= 0 is unsatisfiable
+/// let cs = vec![
+///     Constraint::gt(LinExpr::var("x")),
+///     Constraint::le(LinExpr::var("x")),
+/// ];
+/// assert!(unsat(&cs));
+/// assert!(!unsat(&cs[..1])); // x > 0 alone is satisfiable
+/// ```
 pub fn unsat(constraints: &[Constraint]) -> bool {
     fm_unsat(&normalize_all(constraints))
 }
 
 /// Decide whether `premises` entails `conclusion`, i.e.
 /// `unsat(premises ∧ ¬conclusion)`.
+///
+/// ```
+/// use tpt_eidos_verifier::{Constraint, LinExpr, entails};
+///
+/// // x > 0 entails x >= 0
+/// let premises = vec![Constraint::gt(LinExpr::var("x"))];
+/// let conclusion = Constraint::ge(LinExpr::var("x"));
+/// assert!(entails(&premises, &conclusion));
+/// ```
 pub fn entails(premises: &[Constraint], conclusion: &Constraint) -> bool {
     match conclusion.rel {
         Rel::Eq => {

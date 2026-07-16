@@ -1,14 +1,22 @@
 //! Lexer, recursive-descent parser, and error type for the tpt-eidos MVK
 //! surface language. Pure `std`; no external crates.
 
+#![warn(missing_docs)]
+
 mod ast;
 pub use ast::*;
 
+/// A parse failure. Source positions are not yet tracked; the variant carries
+/// enough context to produce a useful error message.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ParseError {
+    /// The input ended before a complete construct was parsed.
     UnexpectedEof,
+    /// A token appeared where a different one was required.
     UnexpectedToken(String),
+    /// A numeric literal could not be parsed as `f64`.
     InvalidNumber(String),
+    /// A free-form error message from a deeper parse rule.
     Message(String),
 }
 
@@ -730,7 +738,14 @@ impl Parser {
     }
 }
 
-/// Parse tpt-eidos source into a `Module`.
+/// Parse tpt-eidos source into a [`Module`].
+///
+/// ```
+/// use tpt_eidos_parser::parse;
+///
+/// let module = parse("fn id(x: f64) -> f64 { x }").expect("parse");
+/// assert_eq!(module.items.len(), 1);
+/// ```
 pub fn parse(source: &str) -> Result<Module, ParseError> {
     let toks = Lexer::run(source)?;
     let mut p = Parser::new(toks);
@@ -742,8 +757,15 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
 }
 
 /// Parse a single expression. The recursive-descent parser only produces a
-/// `Module`, so the expression is wrapped in a trivial function and the return
-/// value is extracted.
+/// [`Module`], so the expression is wrapped in a trivial function and the
+/// return value is extracted.
+///
+/// ```
+/// use tpt_eidos_parser::{parse_expr, Expr};
+///
+/// let expr = parse_expr("1.0 + 2.0").expect("parse");
+/// assert!(matches!(expr, Expr::Bin { .. }));
+/// ```
 pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
     let m = parse(&format!("fn _() -> f64 {{ return {source}; }}"))?;
     if let Item::Fn(f) = &m.items[0] {

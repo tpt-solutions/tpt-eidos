@@ -14,36 +14,53 @@
 //! * **Termination** — non-recursive functions pass; a recursive call that
 //!   passes its parameters unchanged (no decreasing metric) is rejected.
 
+#![warn(missing_docs)]
+
 use std::collections::{HashMap, HashSet};
 
 use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
 use tpt_eidos_verifier::{entails, unsat, Constraint, LinExpr, Rel};
 
+/// A type-checking or verification error produced by the kernel.
 #[derive(Clone, Debug)]
 pub struct CheckError {
+    /// Human-readable description of what went wrong.
     pub message: String,
 }
 
+/// How a proof obligation was discharged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObligationStatus {
+    /// Discharged by the QF_LRA verifier (`unsat`/`entails`).
     Verified,
+    /// Admitted by a named trusted lemma (see [`Lemma`]).
     Trusted,
+    /// Could not be discharged (verification failed or the solver bailed out).
     Unverified,
 }
 
+/// A single proof obligation recorded during kernel checking.
 #[derive(Clone, Debug)]
 pub struct Obligation {
+    /// Human-readable description of the obligation (e.g. "division safety: mag").
     pub description: String,
+    /// How the obligation was discharged.
     pub status: ObligationStatus,
 }
 
+/// The result of checking a module. Inspect with [`Report::ok`]; iterate
+/// [`Report::errors`] for rejection reasons and [`Report::obligations`] for
+/// the full per-obligation audit trail.
 #[derive(Clone, Debug, Default)]
 pub struct Report {
+    /// All errors that caused the module to be rejected.
     pub errors: Vec<CheckError>,
+    /// Every proof obligation encountered, whether discharged or not.
     pub obligations: Vec<Obligation>,
 }
 
 impl Report {
+    /// Returns `true` if the module was accepted (no errors).
     pub fn ok(&self) -> bool {
         self.errors.is_empty()
     }
@@ -66,7 +83,9 @@ impl Report {
 /// (see `Report::obligations` and `tpt-eidos-flight-math`).
 #[derive(Clone, Copy)]
 pub struct Lemma {
+    /// A stable, human-readable name used in obligation provenance reports.
     pub name: &'static str,
+    /// The matching/application function (see [`Lemma`] for the contract).
     pub apply: fn(&Expr, &[Constraint]) -> Option<Vec<Constraint>>,
 }
 
@@ -86,6 +105,15 @@ pub static DEFAULT_LEMMAS: &[Lemma] = &[Lemma {
 
 /// Type-check a whole module with the default lemma set. Equivalent to
 /// `check_with(module, DEFAULT_LEMMAS)`.
+///
+/// ```
+/// use tpt_eidos_parser::parse;
+/// use tpt_eidos_kernel::check;
+///
+/// let module = parse("fn id(x: f64) -> f64 { x }").expect("parse");
+/// let report = check(&module);
+/// assert!(report.ok());
+/// ```
 pub fn check(module: &Module) -> Report {
     check_with(module, DEFAULT_LEMMAS)
 }

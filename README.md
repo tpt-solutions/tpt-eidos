@@ -1,5 +1,7 @@
 # tpt-eidos
 
+[![CI](https://github.com/tpt-solutions/tpt-eidos/actions/workflows/ci.yml/badge.svg)](https://github.com/tpt-solutions/tpt-eidos/actions/workflows/ci.yml)
+
 **Proof-native, dependently-typed systems language for safety-critical code.**
 
 `tpt-eidos` is a compiler that is also a theorem prover: it refuses to emit code

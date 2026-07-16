@@ -31,6 +31,10 @@ tpt-eidos-erasure = { path = "crates/eidos-erasure", version = "0.1.0" }
 tpt-eidos-codegen = { path = "crates/eidos-codegen", version = "0.1.0" }
 tpt-eidos-flight-math = { path = "crates/eidos-flight-math", version = "0.1.0" }
 
+[workspace.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [profile.release]
 opt-level = 3
 lto = true

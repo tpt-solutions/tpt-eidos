@@ -17,7 +17,12 @@ use super::{Lemma, AGENT_LEMMAS};
 pub enum ProofStep {
     /// Strengthen a function's `requires` with an extra (linear) bound, given as
     /// an eidos expression string.
-    StrengthenRequires { fn_name: String, extra: String },
+    StrengthenRequires {
+        /// The name of the function whose precondition to strengthen.
+        fn_name: String,
+        /// The additional bound as an eidos expression string.
+        extra: String,
+    },
     /// Propose that an agent-gated trusted lemma (by name, from `AGENT_LEMMAS`)
     /// be admitted for this verification.
     ApplyLemma(String),
@@ -26,10 +31,13 @@ pub enum ProofStep {
 /// The kernel's verdict on a single proposed step.
 #[derive(Clone, Debug)]
 pub struct SuggestOutcome {
+    /// The step that was evaluated.
     pub step: ProofStep,
     /// True iff the kernel verified the module *after* applying the step.
     pub accepted: bool,
+    /// Errors from the kernel (non-empty when `accepted` is `false`).
     pub errors: Vec<CheckError>,
+    /// All proof obligations recorded during re-verification of this step.
     pub obligations: Vec<Obligation>,
 }
 

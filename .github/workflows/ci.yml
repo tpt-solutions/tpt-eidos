@@ -24,6 +24,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Dry-run publish
+        run: cargo publish --dry-run -p tpt-eidos-verifier
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.74
+      - name: Check (MSRV)
+        run: cargo check --workspace
 
   coverage:
     runs-on: ubuntu-latest

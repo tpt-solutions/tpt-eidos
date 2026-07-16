@@ -9,6 +9,8 @@
 //! emitted as `const`-generic, stack-only functions, so generated code never
 //! allocates.
 
+#![warn(missing_docs)]
+
 use tpt_eidos_erasure::{CExpr, CExprKind, CoreFun, CoreModule, CoreType, StructDef};
 use tpt_eidos_parser::Pattern;
 
