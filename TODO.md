@@ -181,9 +181,27 @@ later phases stay directional until Phase 1-2 are real.
       `eidos-flight-math/src/lib.rs:74-85` matches `(a+b).magnitude() <= K` for any `K` with
       zero side conditions checking `K >= |a| + |b|` — the one visible hole in "an
       agent-suggested proof step is never trusted without kernel approval."
-- [ ] **[Medium]** Fixed-epsilon floating point (`EPS = 1e-9`,
-      `eidos-verifier/src/lib.rs:10`) is the sole soundness oracle for the trusted decision
-      procedure; no exact rational arithmetic is used anywhere.
+- [x] **[Medium]** Fixed-epsilon floating point (`EPS = 1e-9`, formerly
+      `eidos-verifier/src/lib.rs:10`) was the sole soundness oracle for the trusted decision
+      procedure; no exact rational arithmetic was used anywhere — fixed by adding an internal
+      exact-rational core (`eidos-verifier/src/lib.rs`'s private `rat` module: `Rat`, an
+      `i128` numerator/denominator fraction always kept reduced) and rerouting
+      `fm_unsat`/`solve` through it. Every `f64` literal reaching the solver is losslessly
+      decomposed into its exact IEEE-754 fraction (`Rat::from_f64`); all elimination-round
+      arithmetic (`add`/`sub`/`scale`) is now exact, so satisfiability decisions no longer
+      depend on floating-point rounding and `EPS` is gone from the decision procedure (it
+      survives only as a display tolerance in a couple of tests, for the final `Rat -> f64`
+      conversion). `checked_add`/`checked_mul` combine via LCM/cross-GCD reduction rather
+      than a naive `d1*d2` product — Fourier-Motzkin repeatedly re-derives bounds sharing a
+      common denominator factor, and the naive product would square that shared factor at
+      every combination step, overflowing `i128` almost immediately; reducing through the GCD
+      first keeps results only as large as the algebra actually requires. Any operation that
+      would still overflow `i128` (or a literal that can't be represented exactly) bails
+      conservatively toward "unverified", matching the `MAX_CONSTRAINTS` guard's existing
+      philosophy elsewhere in the module. Regression tests
+      (`exact_boundary_lt_excludes_tiny_positive`, `exact_boundary_le_rejects_tiny_positive`)
+      pin the fixed behavior: `1e-9` used to be silently tolerated as "close enough to zero"
+      under the old fudge factor and is now correctly excluded.
 - [x] **[Medium]** `let`-bindings never enter the linear proof context —
       `eidos-kernel/src/lib.rs:197-200`; `let x = 5.0; return a / x;` spuriously fails to
       verify even though `x` is a manifest nonzero literal.
@@ -209,9 +227,12 @@ later phases stay directional until Phase 1-2 are real.
 - [x] **[Low]** `crate_name` can emit an invalid Cargo package name —
       `eidos-cli/src/main.rs:40-54` for file stems that are all-non-alphanumeric or start
       with a digit.
-- [ ] **[Low]** `unreachable!()` relies on an unenforced invariant (defensive: `Constraint::normalize` only ever emits `Le`/`Lt`, so these arms are unreachable in practice) —
-      `eidos-verifier/src/lib.rs:172,265` assume only `Le`/`Lt` ever reach these arms, with
-      no type-level guarantee.
+- [x] **[Low]** `unreachable!()` relied on an unenforced invariant (defensive: `Constraint::normalize` only ever emitted `Le`/`Lt`, so these arms were unreachable in practice, with no type-level guarantee) —
+      fixed by introducing a dedicated `NormRel { Le, Lt }` type for the solver's internal
+      `Norm` representation (`eidos-verifier/src/lib.rs`), so the `Le`/`Lt`-only invariant is
+      now enforced by the type checker instead of an `unreachable!()` arm; `Rel` (which still
+      has `Ge`/`Gt`/`Eq`) remains the public constraint-construction API and is reduced to
+      `NormRel` only inside `Constraint::normalize`.
 
 ## Ideas: ease of use / innovation (directional, not scheduled)
 - Parse errors carry zero position info (no line/column anywhere in `ParseError`) — the

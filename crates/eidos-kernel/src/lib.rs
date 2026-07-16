@@ -916,8 +916,21 @@ fn type_name(ty: &Type) -> String {
 
 /// Linearize an expression into a `LinExpr` (used by `to_constraint`, `cmp`, and
 /// the `normalized_vector` lemma). Returns `None` for genuinely non-linear
-/// sub-expressions (products of two variables, `magnitude()`, ...).
-fn linearize(e: &Expr) -> Option<LinExpr> {
+/// sub-expressions the kernel has no other way to reason about.
+///
+/// `.magnitude()` calls are the one exception: rather than giving up, they're
+/// admitted as an *opaque atom* — a fresh linear variable keyed by the call's
+/// canonical string form (`expr_to_string`), so `a.magnitude()` used in two
+/// places (e.g. a `requires` clause and a lemma's side condition) refers to
+/// the same atom, giving congruence "for free" from structural equality. This
+/// doesn't make magnitude computable — the atom carries no numeric value
+/// unless something else in the linear context bounds it (a `requires
+/// a.magnitude() <= 1.0`, for instance) — it just lets such bounds actually
+/// enter the linear context instead of being silently dropped. This is what
+/// lets domain lemmas like `tpt-eidos-flight-math`'s `triangle_for_add`
+/// derive a real, checked side condition (`K >= a.magnitude() + b.magnitude()`)
+/// instead of admitting unconditionally.
+pub fn linearize(e: &Expr) -> Option<LinExpr> {
     match e {
         Expr::Num(n) => Some(LinExpr::constant(*n)),
         Expr::Var(v) => Some(LinExpr::var(v.clone())),
@@ -950,6 +963,9 @@ fn linearize(e: &Expr) -> Option<LinExpr> {
                 }
                 _ => None,
             }
+        }
+        Expr::Method { name, args, .. } if name == "magnitude" && args.is_empty() => {
+            Some(LinExpr::var(expr_to_string(e)))
         }
         _ => None,
     }
