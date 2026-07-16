@@ -14,36 +14,55 @@
 //! * **Termination** — non-recursive functions pass; a recursive call that
 //!   passes its parameters unchanged (no decreasing metric) is rejected.
 
+#![warn(missing_docs)]
+
 use std::collections::{HashMap, HashSet};
 
 use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
 use tpt_eidos_verifier::{entails, unsat, Constraint, LinExpr, Rel};
 
+/// A rejection reason produced while checking a module. Every entry in
+/// `Report::errors` is one of these; `Report::ok()` is `true` iff there are
+/// none.
 #[derive(Clone, Debug)]
 pub struct CheckError {
+    /// Human-readable description of what could not be proven.
     pub message: String,
 }
 
+/// The outcome of attempting to discharge a single proof obligation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObligationStatus {
+    /// Proven directly by the QF_LRA linear prover.
     Verified,
+    /// Accepted via a named trusted `Lemma` (the domain-library boundary).
     Trusted,
+    /// Could not be proven; a corresponding `CheckError` is also recorded.
     Unverified,
 }
 
+/// A single proof obligation the kernel attempted to discharge, and its
+/// outcome.
 #[derive(Clone, Debug)]
 pub struct Obligation {
+    /// Human-readable description of what was being proven.
     pub description: String,
+    /// Whether the obligation was discharged, and how.
     pub status: ObligationStatus,
 }
 
+/// The result of type-checking a module: every proof obligation encountered,
+/// and every error that prevents acceptance.
 #[derive(Clone, Debug, Default)]
 pub struct Report {
+    /// Rejection reasons. The module is accepted iff this is empty.
     pub errors: Vec<CheckError>,
+    /// Every proof obligation attempted, verified or not.
     pub obligations: Vec<Obligation>,
 }
 
 impl Report {
+    /// True iff the module was accepted (no errors).
     pub fn ok(&self) -> bool {
         self.errors.is_empty()
     }
@@ -66,7 +85,11 @@ impl Report {
 /// (see `Report::obligations` and `tpt-eidos-flight-math`).
 #[derive(Clone, Copy)]
 pub struct Lemma {
+    /// The lemma's name, recorded in `Obligation::description` so a trusted
+    /// obligation can always be traced back to the fact that admitted it.
     pub name: &'static str,
+    /// See the `Lemma` doc comment for the contract this function must
+    /// satisfy.
     pub apply: fn(&Expr, &[Constraint]) -> Option<Vec<Constraint>>,
 }
 

@@ -25,6 +25,14 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<ExitCode, String> {
     let cmd = args.first().map(String::as_str).unwrap_or("");
     match cmd {
+        "--version" | "-V" => {
+            println!("eidos {}", env!("CARGO_PKG_VERSION"));
+            Ok(ExitCode::SUCCESS)
+        }
+        "--help" | "-h" => {
+            println!("{}", usage());
+            Ok(ExitCode::SUCCESS)
+        }
         "check" => cmd_check(args.get(1).map(String::as_str)),
         "build" => cmd_build(args),
         "" => Err(usage()),
@@ -33,7 +41,8 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
 }
 
 fn usage() -> String {
-    "usage:\n  eidos check <file>\n  eidos build <file> --out-dir <dir>".to_string()
+    "usage:\n  eidos check <file>\n  eidos build <file> --out-dir <dir>\n  eidos --version\n  eidos --help"
+        .to_string()
 }
 
 /// Derive a valid Rust crate name from the source file path. Cargo package
@@ -203,5 +212,21 @@ mod tests {
     fn crate_name_lowercases_and_normalizes() {
         assert_eq!(crate_name("My.Mod.eidos"), "my_mod");
         assert_eq!(crate_name("CamelCase.eidos"), "camelcase");
+    }
+
+    #[test]
+    fn version_flag_succeeds() {
+        for flag in ["--version", "-V"] {
+            let r = run(&[flag.to_string()]);
+            assert!(matches!(r, Ok(ExitCode::SUCCESS)), "flag: {flag}");
+        }
+    }
+
+    #[test]
+    fn help_flag_succeeds() {
+        for flag in ["--help", "-h"] {
+            let r = run(&[flag.to_string()]);
+            assert!(matches!(r, Ok(ExitCode::SUCCESS)), "flag: {flag}");
+        }
     }
 }
