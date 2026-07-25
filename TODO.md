@@ -234,15 +234,42 @@ later phases stay directional until Phase 1-2 are real.
       has `Ge`/`Gt`/`Eq`) remains the public constraint-construction API and is reduced to
       `NormRel` only inside `Constraint::normalize`.
 
+## Phase 6: Hardening & adoption
+- [ ] Thread source spans (line/col) from the lexer through `ParseError`, and from the AST
+      through `eidos-kernel`'s `CheckError`/`Obligation`, so `eidos check`/`eidos build`
+      report `path:line:col: message` instead of a bare message. Touches
+      `eidos-parser/src/ast.rs` (`Span`, wrap `Expr` as `{ kind: ExprKind, span: Span }`),
+      `eidos-parser/src/lib.rs` (lexer + parser), `eidos-kernel/src/lib.rs`,
+      `eidos-erasure`/`eidos-codegen`/`eidos-flight-math` (mechanical `.kind` match updates),
+      and `eidos-cli/src/main.rs` (error rendering).
+- [ ] Fix the open `triangle_for_add` soundness gap in `eidos-flight-math/src/lib.rs:74-85`:
+      require `K >= |a| + |b|` before accepting the lemma instead of admitting any `K`.
+- [ ] `eidos new <name>` scaffold subcommand (`eidos-cli`): writes a minimal
+      `calibrate_gyro`-style starter `.eidos` file.
+- [ ] `docs/getting-started.md`: an end-to-end walkthrough of `eidos check`/`eidos build`
+      over `examples/calibrate_gyro.eidos` and `examples/calibrate_gyro_broken.eidos`,
+      linked from `README.md`.
+- [ ] Root `CONTRIBUTING.md`: contributions go through GitHub Issues only.
+- [ ] Rename `crates/eidos-*` directories to `crates/tpt-eidos-*` to match the published
+      crate names; update root `Cargo.toml` workspace members/paths and `AGENTS.md`'s
+      workspace-layout tree.
+- [ ] Give each crate its own crates.io `keywords`/`categories` in its `Cargo.toml` instead
+      of inheriting the shared `workspace.package` list.
+- [ ] `tpt-eidos-controls-math`: a second, non-aerospace domain-library crate (generic
+      control-systems primitives — output clamping, rate limiting) reusing the
+      `Lemma`/`TrustedLemmas` pattern from `eidos-flight-math`, with an `examples/` fixture
+      and an `eidos-tests` integration test.
+
 ## Ideas: ease of use / innovation (directional, not scheduled)
 - Parse errors carry zero position info (no line/column anywhere in `ParseError`) — the
   single biggest DX gap for a language meant for careful, safety-critical authoring.
   `CheckError`/`Obligation` diagnostics are equally locationless.
-- No `--help`/`-h` or `--version`/`-V` on the CLI — `eidos --help` currently falls into the
-  "unknown subcommand" error path with a nonzero exit code.
+- ~~No `--help`/`-h` or `--version`/`-V` on the CLI~~ — **done**: both flags are handled in
+  `eidos-cli/src/main.rs::run`, tested by `help_flag_succeeds`/`version_flag_succeeds`.
 - Missing subcommands users would reasonably expect: `eidos fmt`, `eidos new <name>`
-  (scaffold), `eidos test` (batch-check a directory), `eidos build --run` (auto-invoke
-  `cargo build`/`run` on the emitted crate), and a `--emit=ast|core` debug-dump flag.
+  (scaffold — see Phase 6), `eidos test` (batch-check a directory), `eidos build --run`
+  (auto-invoke `cargo build`/`run` on the emitted crate), and a `--emit=ast|core` debug-dump
+  flag.
 - No `--json` output mode on `eidos check` for machine/editor consumption, no batch/glob
   mode (`eidos check src/**/*.eidos`).
 - `eidos check` only reports an aggregate "N verified, M trusted-lemma" count; a

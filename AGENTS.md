@@ -7,9 +7,13 @@ proof terms for zero-cost extraction to `no_std` Rust.
 
 This repo implements **Phase 1: the Minimal Viable Kernel (MVK)** — the
 trusted refinement-type checker plus a transparent QF_LRA decision procedure —
-and **Phase 2: the Eraser** — proof-term erasure to a computational core and
-codegen to `no_std` Rust. The remaining phases (flight-math domain library,
-AI proof synthesis) are still directional.
+**Phase 2: the Eraser** — proof-term erasure to a computational core and
+codegen to `no_std` Rust — **Phase 3: the Domain Library**
+(`tpt-eidos-flight-math`, pre-proved flight-control primitives) — and
+**Phase 4: AI-Assisted Proof Synthesis** (`eidos-flight-math::prover`, kernel-
+gated agent proof-step suggestions). See `TODO.md` for the full phase-by-phase
+status, including Phase 5 (hardening) and Phase 6 (adoption/hardening
+follow-ups).
 
 ## Workspace layout
 
