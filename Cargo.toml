@@ -1,14 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/eidos-verifier",
-    "crates/eidos-parser",
-    "crates/eidos-kernel",
-    "crates/eidos-erasure",
-    "crates/eidos-codegen",
-    "crates/eidos-cli",
-    "crates/eidos-tests",
-    "crates/eidos-flight-math",
+    "crates/tpt-eidos-verifier",
+    "crates/tpt-eidos-parser",
+    "crates/tpt-eidos-kernel",
+    "crates/tpt-eidos-erasure",
+    "crates/tpt-eidos-codegen",
+    "crates/tpt-eidos-cli",
+    "crates/tpt-eidos-tests",
+    "crates/tpt-eidos-flight-math",
+    "crates/tpt-eidos-controls-math",
 ]
 
 [workspace.package]
@@ -24,12 +25,13 @@ keywords = ["refinement-types", "verification", "proof", "no-std", "dependently-
 categories = ["compilers", "command-line-utilities", "mathematics", "embedded", "science"]
 
 [workspace.dependencies]
-tpt-eidos-verifier = { path = "crates/eidos-verifier", version = "0.1.0" }
-tpt-eidos-parser = { path = "crates/eidos-parser", version = "0.1.0" }
-tpt-eidos-kernel = { path = "crates/eidos-kernel", version = "0.1.0" }
-tpt-eidos-erasure = { path = "crates/eidos-erasure", version = "0.1.0" }
-tpt-eidos-codegen = { path = "crates/eidos-codegen", version = "0.1.0" }
-tpt-eidos-flight-math = { path = "crates/eidos-flight-math", version = "0.1.0" }
+tpt-eidos-verifier = { path = "crates/tpt-eidos-verifier", version = "0.1.0" }
+tpt-eidos-parser = { path = "crates/tpt-eidos-parser", version = "0.1.0" }
+tpt-eidos-kernel = { path = "crates/tpt-eidos-kernel", version = "0.1.0" }
+tpt-eidos-erasure = { path = "crates/tpt-eidos-erasure", version = "0.1.0" }
+tpt-eidos-codegen = { path = "crates/tpt-eidos-codegen", version = "0.1.0" }
+tpt-eidos-flight-math = { path = "crates/tpt-eidos-flight-math", version = "0.1.0" }
+tpt-eidos-controls-math = { path = "crates/tpt-eidos-controls-math", version = "0.1.0" }
 
 [profile.release]
 opt-level = 3

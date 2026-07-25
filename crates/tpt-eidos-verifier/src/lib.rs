@@ -41,7 +41,7 @@ const MAX_CONSTRAINTS: usize = 200_000;
 /// rounds compounding denominators), the caller bails conservatively toward
 /// "unverified" rather than silently losing precision, matching the
 /// `MAX_CONSTRAINTS` guard's philosophy elsewhere in this module.
-mod rat {
+pub mod rat {
     use std::cmp::Ordering;
 
     /// An exact rational number, always kept reduced to lowest terms with a
@@ -67,6 +67,7 @@ mod rat {
     }
 
     impl Rat {
+        /// The zero rational (`0/1`).
         pub fn zero() -> Rat {
             Rat { num: 0, den: 1 }
         }
@@ -131,18 +132,22 @@ mod rat {
             self.num as f64 / self.den as f64
         }
 
+        /// True iff `self == 0`.
         pub fn is_zero(self) -> bool {
             self.num == 0
         }
 
+        /// True iff `self > 0`.
         pub fn is_pos(self) -> bool {
             self.num > 0
         }
 
+        /// True iff `self < 0`.
         pub fn is_neg(self) -> bool {
             self.num < 0
         }
 
+        /// Negate; `None` on overflow.
         pub fn checked_neg(self) -> Option<Rat> {
             Some(Rat {
                 num: self.num.checked_neg()?,
@@ -161,6 +166,7 @@ mod rat {
         // as small as the *reduced* fraction actually needs, which is what
         // an exact-rational implementation has to do to be viable on `i128`
         // instead of requiring arbitrary-precision integers.
+        /// Exact addition via LCM/cross-GCD reduction; `None` on overflow.
         pub fn checked_add(self, other: Rat) -> Option<Rat> {
             let g = gcd(self.den.unsigned_abs(), other.den.unsigned_abs()) as i128;
             let self_den_over_g = self.den / g;
@@ -173,10 +179,12 @@ mod rat {
             Rat::new(num, den)
         }
 
+        /// Exact subtraction; `None` on overflow.
         pub fn checked_sub(self, other: Rat) -> Option<Rat> {
             self.checked_add(other.checked_neg()?)
         }
 
+        /// Exact multiplication via GCD reduction; `None` on overflow.
         pub fn checked_mul(self, other: Rat) -> Option<Rat> {
             let g1 = gcd(self.num.unsigned_abs(), other.den.unsigned_abs()) as i128;
             let g2 = gcd(other.num.unsigned_abs(), self.den.unsigned_abs()) as i128;
@@ -194,6 +202,7 @@ mod rat {
             Rat::new(self.den, self.num)
         }
 
+        /// Compare two rationals exactly; `None` on overflow.
         pub fn checked_cmp(self, other: Rat) -> Option<Ordering> {
             let diff = self.checked_sub(other)?;
             Some(if diff.is_pos() {
@@ -207,7 +216,211 @@ mod rat {
     }
 }
 
-use rat::Rat;
+pub use rat::Rat;
+
+/// Sparse multivariate polynomial over exact rationals.
+///
+/// Used by [`SosCertificate`] to express the sum-of-squares identity
+/// `target - Σ cᵢ·sᵢ² = 0`. Each monomial is a sorted list of
+/// `(variable, exponent)` pairs with a rational coefficient; zero-coefficient
+/// terms are never stored.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Poly {
+    terms: BTreeMap<Vec<(String, u32)>, Rat>,
+}
+
+impl Poly {
+    /// The zero polynomial.
+    pub fn zero() -> Self {
+        Poly {
+            terms: BTreeMap::new(),
+        }
+    }
+
+    /// A monomial: `coeff * x₁^e₁ * x₂^e₂ * ...`
+    pub fn monomial(vars: Vec<(String, u32)>, coeff: Rat) -> Self {
+        let mut p = Poly::zero();
+        if !coeff.is_zero() {
+            p.terms.insert(vars, coeff);
+        }
+        p
+    }
+
+    /// Constant polynomial equal to `r`.
+    pub fn from_rat(r: Rat) -> Self {
+        Self::monomial(vec![], r)
+    }
+
+    /// Convert a [`LinExpr`] (f64-based) to an exact `Poly`.
+    /// Returns `None` if any coefficient/constant can't be represented exactly.
+    pub fn from_lin(e: &LinExpr) -> Option<Poly> {
+        let mut p = Poly::from_rat(Rat::from_f64(e.constant)?);
+        for (name, coeff) in &e.coeffs {
+            let r = Rat::from_f64(*coeff)?;
+            if !r.is_zero() {
+                let mono = Poly::monomial(vec![(name.clone(), 1)], r);
+                p = p.checked_add(&mono)?;
+            }
+        }
+        Some(p)
+    }
+
+    /// `self + other`.
+    pub fn checked_add(&self, other: &Poly) -> Option<Poly> {
+        let mut terms = self.terms.clone();
+        for (k, v) in &other.terms {
+            let entry = terms.entry(k.clone()).or_insert_with(Rat::zero);
+            *entry = entry.checked_add(*v)?;
+            if entry.is_zero() {
+                terms.remove(k);
+            }
+        }
+        Some(Poly { terms })
+    }
+
+    /// `-self`.
+    pub fn checked_neg(&self) -> Option<Poly> {
+        let mut terms = BTreeMap::new();
+        for (k, v) in &self.terms {
+            terms.insert(k.clone(), v.checked_neg()?);
+        }
+        Some(Poly { terms })
+    }
+
+    /// `self - other`.
+    pub fn checked_sub(&self, other: &Poly) -> Option<Poly> {
+        self.checked_add(&other.checked_neg()?)
+    }
+
+    /// `self * other` via distributive expansion.
+    pub fn checked_mul(&self, other: &Poly) -> Option<Poly> {
+        let mut result = Poly::zero();
+        for (k1, c1) in &self.terms {
+            for (k2, c2) in &other.terms {
+                let mut merged: BTreeMap<String, u32> = BTreeMap::new();
+                for (var, exp) in k1.iter().chain(k2.iter()) {
+                    *merged.entry(var.clone()).or_insert(0) += exp;
+                }
+                let key: Vec<(String, u32)> = merged.into_iter().collect();
+                let coeff = c1.checked_mul(*c2)?;
+                let entry = result.terms.entry(key.clone()).or_insert_with(Rat::zero);
+                *entry = entry.checked_add(coeff)?;
+                if entry.is_zero() {
+                    result.terms.remove(&key);
+                }
+            }
+        }
+        Some(result)
+    }
+
+    /// Square `self * self`.
+    pub fn checked_square(&self) -> Option<Poly> {
+        self.checked_mul(self)
+    }
+
+    /// Scale every coefficient by `s`.
+    pub fn checked_scale(&self, s: Rat) -> Option<Poly> {
+        let mut terms = BTreeMap::new();
+        for (k, v) in &self.terms {
+            let c = v.checked_mul(s)?;
+            if !c.is_zero() {
+                terms.insert(k.clone(), c);
+            }
+        }
+        Some(Poly { terms })
+    }
+
+    /// Evaluate under a variable assignment (missing variables default to zero).
+    pub fn evaluate(&self, env: &BTreeMap<String, Rat>) -> Option<Rat> {
+        let mut sum = Rat::zero();
+        for (monomial, coeff) in &self.terms {
+            let mut prod = *coeff;
+            for (var, exp) in monomial {
+                let base = env.get(var).copied().unwrap_or_else(Rat::zero);
+                for _ in 0..*exp {
+                    prod = prod.checked_mul(base)?;
+                }
+            }
+            sum = sum.checked_add(prod)?;
+        }
+        Some(sum)
+    }
+
+    /// True iff every coefficient is zero.
+    pub fn is_zero(&self) -> bool {
+        self.terms.is_empty()
+    }
+
+    /// Collect all variable names appearing in the polynomial.
+    pub fn variables(&self) -> BTreeSet<String> {
+        let mut vars = BTreeSet::new();
+        for key in self.terms.keys() {
+            for (var, _) in key {
+                vars.insert(var.clone());
+            }
+        }
+        vars
+    }
+
+    /// The total degree (highest sum of exponents in any monomial).
+    pub fn degree(&self) -> u32 {
+        self.terms
+            .keys()
+            .map(|k| k.iter().map(|(_, e)| e).sum())
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// A sum-of-squares certificate proving that `target = Σ cᵢ · sᵢ²` where
+/// every `cᵢ >= 0` (nonnegative rational) and each `sᵢ` is a proposer-
+/// supplied polynomial. Pure arithmetic, no search — the entire new trusted
+/// surface for non-linear obligations.
+///
+/// `target` is the polynomial `bound - expr` that must be shown
+/// nonnegative (as a sum of nonnegative squares) to discharge a
+/// non-linear obligation like `|a + b| <= K`.
+pub struct SosCertificate {
+    /// The polynomial identity target: `target == Σ cᵢ · sᵢ²`.
+    pub target: Poly,
+    /// `(coefficient cᵢ, witness polynomial sᵢ)` pairs.
+    pub terms: Vec<(Rat, Poly)>,
+}
+
+/// Check a sum-of-squares certificate. Returns `true` iff:
+///
+/// 1. Every coefficient `cᵢ` is nonnegative (`>= 0`).
+/// 2. The identity `target = Σ cᵢ · sᵢ²` holds exactly (every monomial
+///    on the left cancels with the right, over `Rat`).
+///
+/// This is the sole new trusted surface: pure arithmetic comparison, no
+/// search, no heuristics. If this returns `true`, the certificate
+/// proves `target` is a sum of nonnegative squares, hence `target >= 0`.
+pub fn check_sos_certificate(cert: &SosCertificate) -> bool {
+    for (coeff, _) in &cert.terms {
+        if coeff.is_neg() {
+            return false;
+        }
+    }
+
+    let mut sum = Poly::from_rat(Rat::zero());
+    for (coeff, s) in &cert.terms {
+        let sq = match s.checked_square() {
+            Some(v) => v,
+            None => return false,
+        };
+        let scaled = match sq.checked_scale(*coeff) {
+            Some(v) => v,
+            None => return false,
+        };
+        sum = match sum.checked_add(&scaled) {
+            Some(v) => v,
+            None => return false,
+        };
+    }
+
+    sum == cert.target
+}
 
 /// A linear expression `Σ cᵢ·xᵢ + k`. Variables are identified by name.
 #[derive(Clone, Debug, PartialEq)]
@@ -856,5 +1069,156 @@ mod tests {
         // x <= 0 with x == 0 exactly is satisfiable, still.
         let cs = vec![Constraint::le(v("x")), Constraint::eq(v("x"))];
         assert!(!unsat(&cs), "x <= 0 must allow x == 0 exactly");
+    }
+
+    // --- Poly / SosCertificate tests ---
+
+    #[test]
+    fn poly_add_and_mul_basic() {
+        let one = Rat::from_f64(1.0).unwrap();
+        let two = Rat::from_f64(2.0).unwrap();
+        // p1 = 2*x
+        let p1 = Poly::monomial(vec![("x".into(), 1)], two);
+        // p2 = 1 (constant)
+        let p2 = Poly::from_rat(one);
+        // p1 + p2 = 2*x + 1
+        let sum = p1.checked_add(&p2).unwrap();
+        // evaluate at x=3: 2*3 + 1 = 7
+        let mut env3 = BTreeMap::new();
+        env3.insert("x".into(), Rat::from_f64(3.0).unwrap());
+        assert_eq!(sum.evaluate(&env3).unwrap(), Rat::from_f64(7.0).unwrap());
+
+        // p1 * p2 = 2*x
+        let prod = p1.checked_mul(&p2).unwrap();
+        assert_eq!(prod.evaluate(&env3).unwrap(), Rat::from_f64(6.0).unwrap());
+    }
+
+    #[test]
+    fn poly_square_and_degree() {
+        let one = Rat::from_f64(1.0).unwrap();
+        // (x + 1)^2 = x^2 + 2*x + 1
+        let p = Poly::monomial(vec![("x".into(), 1)], one)
+            .checked_add(&Poly::from_rat(one))
+            .unwrap();
+        let sq = p.checked_square().unwrap();
+        assert_eq!(sq.degree(), 2);
+        assert_eq!(sq.terms.len(), 3);
+        let mut env2 = BTreeMap::new();
+        env2.insert("x".into(), Rat::from_f64(2.0).unwrap());
+        // (2+1)^2 = 9
+        assert_eq!(sq.evaluate(&env2).unwrap(), Rat::from_f64(9.0).unwrap());
+    }
+
+    #[test]
+    fn sos_certificate_accepts_correct() {
+        // Certificate for x^2 >= 0: target = x^2, term = (1, x)
+        // identity: x^2 = 1 * x^2
+        let one = Rat::from_f64(1.0).unwrap();
+        let x_sq = Poly::monomial(vec![("x".into(), 2)], one);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let cert = SosCertificate {
+            target: x_sq,
+            terms: vec![(one, x)],
+        };
+        assert!(check_sos_certificate(&cert));
+    }
+
+    #[test]
+    fn sos_certificate_rejects_negative_coeff() {
+        let one = Rat::from_f64(1.0).unwrap();
+        let neg_one = one.checked_neg().unwrap();
+        let x_sq = Poly::monomial(vec![("x".into(), 2)], neg_one);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let cert = SosCertificate {
+            target: x_sq,
+            terms: vec![(neg_one, x)],
+        };
+        assert!(!check_sos_certificate(&cert));
+    }
+
+    #[test]
+    fn sos_certificate_rejects_mismatched_expansion() {
+        // Claim: 1 = 1 * x^2  (false: LHS != RHS)
+        let one = Rat::from_f64(1.0).unwrap();
+        let target = Poly::from_rat(one);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let cert = SosCertificate {
+            target,
+            terms: vec![(one, x)],
+        };
+        assert!(!check_sos_certificate(&cert));
+    }
+
+    #[test]
+    fn sos_certificate_triangle_like() {
+        // Triangle inequality proof sketch (symbolic):
+        // K^2 - a^2 - b^2 - 2*a*b with K = a + b:
+        //   (a+b)^2 - a^2 - b^2 - 2ab = 0
+        // = 1*(a+b)^2 + (-1)*a^2 + (-1)*b^2 + (-2)*a*b
+        // But we need SOS, so use:
+        // target = 2*K*a + 2*K*b - a^2 - b^2 - 2*a*b + K^2 - K^2
+        // Actually let's just test a simple SOS identity:
+        // (a - b)^2 = a^2 - 2*a*b + b^2, so:
+        // target = a^2 - 2*a*b + b^2 = 1 * (a-b)^2
+        let one = Rat::from_f64(1.0).unwrap();
+        let neg_two = Rat::from_f64(-2.0).unwrap();
+        // target = 1*a^2 + (-2)*a*b + 1*b^2
+        let a_sq = Poly::monomial(vec![("a".into(), 2)], one);
+        let ab = Poly::monomial(vec![("a".into(), 1), ("b".into(), 1)], neg_two);
+        let b_sq = Poly::monomial(vec![("b".into(), 2)], one);
+        let target = a_sq.checked_add(&ab).unwrap().checked_add(&b_sq).unwrap();
+        // witness: s = a - b
+        let a = Poly::monomial(vec![("a".into(), 1)], one);
+        let neg_b = Poly::monomial(vec![("b".into(), 1)], one.checked_neg().unwrap());
+        let s = a.checked_add(&neg_b).unwrap();
+        let cert = SosCertificate {
+            target,
+            terms: vec![(one, s)],
+        };
+        assert!(check_sos_certificate(&cert));
+    }
+
+    #[test]
+    fn sos_certificate_rejects_two_term_mismatch() {
+        // Claim: 5 = 1*x^2 + 1*y^2  (false in general)
+        let one = Rat::from_f64(1.0).unwrap();
+        let five = Rat::from_f64(5.0).unwrap();
+        let target = Poly::from_rat(five);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let y = Poly::monomial(vec![("y".into(), 1)], one);
+        let cert = SosCertificate {
+            target,
+            terms: vec![(one, x), (one, y)],
+        };
+        assert!(!check_sos_certificate(&cert));
+    }
+
+    #[test]
+    fn poly_variables_and_is_zero() {
+        let p = Poly::zero();
+        assert!(p.is_zero());
+        assert!(p.variables().is_empty());
+
+        let one = Rat::from_f64(1.0).unwrap();
+        let p = Poly::monomial(vec![("x".into(), 1), ("y".into(), 2)], one);
+        assert!(!p.is_zero());
+        let vars = p.variables();
+        assert!(vars.contains("x"));
+        assert!(vars.contains("y"));
+        assert_eq!(vars.len(), 2);
+    }
+
+    #[test]
+    fn poly_from_lin_roundtrip() {
+        let le = LinExpr {
+            coeffs: BTreeMap::from([("x".into(), 3.0), ("y".into(), -2.0)]),
+            constant: 1.0,
+        };
+        let p = Poly::from_lin(&le).unwrap();
+        let mut env = BTreeMap::new();
+        env.insert("x".into(), Rat::from_f64(4.0).unwrap());
+        env.insert("y".into(), Rat::from_f64(5.0).unwrap());
+        // 3*4 + (-2)*5 + 1 = 12 - 10 + 1 = 3
+        assert_eq!(p.evaluate(&env).unwrap(), Rat::from_f64(3.0).unwrap());
     }
 }

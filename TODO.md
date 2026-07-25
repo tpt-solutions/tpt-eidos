@@ -177,10 +177,11 @@ later phases stay directional until Phase 1-2 are real.
       (`eidos-flight-math/src/prover.rs:40-85`) feeds an untrusted external string straight
       through `parse_expr` and `check_module_with`, inheriting the two DoS surfaces above by
       design, not just by malformed-file accident.
-- [ ] **[Medium]** `triangle_for_add` agent lemma admits an unconstrained bound (regression test pinned in `eidos-flight-math`: `triangle_for_add_accepts_false_bound`; still unsound by design, gated behind the agent loop) —
+- [x] **[Medium]** `triangle_for_add` agent lemma admits an unconstrained bound (regression test pinned in `eidos-flight-math`: `triangle_for_add_accepts_false_bound`; still unsound by design, gated behind the agent loop) —
       `eidos-flight-math/src/lib.rs:74-85` matches `(a+b).magnitude() <= K` for any `K` with
       zero side conditions checking `K >= |a| + |b|` — the one visible hole in "an
-      agent-suggested proof step is never trusted without kernel approval."
+      agent-suggested proof step is never trusted without kernel approval." **Fixed as part of
+      Phase 7c**: retired the lemma in favor of `ProposeNonlinearCertificate` + `SosCertificate`.
 - [x] **[Medium]** Fixed-epsilon floating point (`EPS = 1e-9`, formerly
       `eidos-verifier/src/lib.rs:10`) was the sole soundness oracle for the trusted decision
       procedure; no exact rational arithmetic was used anywhere — fixed by adding an internal
@@ -235,30 +236,105 @@ later phases stay directional until Phase 1-2 are real.
       `NormRel` only inside `Constraint::normalize`.
 
 ## Phase 6: Hardening & adoption
-- [ ] Thread source spans (line/col) from the lexer through `ParseError`, and from the AST
+- [x] Thread source spans (line/col) from the lexer through `ParseError`, and from the AST
       through `eidos-kernel`'s `CheckError`/`Obligation`, so `eidos check`/`eidos build`
       report `path:line:col: message` instead of a bare message. Touches
       `eidos-parser/src/ast.rs` (`Span`, wrap `Expr` as `{ kind: ExprKind, span: Span }`),
       `eidos-parser/src/lib.rs` (lexer + parser), `eidos-kernel/src/lib.rs`,
       `eidos-erasure`/`eidos-codegen`/`eidos-flight-math` (mechanical `.kind` match updates),
       and `eidos-cli/src/main.rs` (error rendering).
-- [ ] Fix the open `triangle_for_add` soundness gap in `eidos-flight-math/src/lib.rs:74-85`:
-      require `K >= |a| + |b|` before accepting the lemma instead of admitting any `K`.
-- [ ] `eidos new <name>` scaffold subcommand (`eidos-cli`): writes a minimal
+- [x] `eidos new <name>` scaffold subcommand (`eidos-cli`): writes a minimal
       `calibrate_gyro`-style starter `.eidos` file.
-- [ ] `docs/getting-started.md`: an end-to-end walkthrough of `eidos check`/`eidos build`
+- [x] `docs/getting-started.md`: an end-to-end walkthrough of `eidos check`/`eidos build`
       over `examples/calibrate_gyro.eidos` and `examples/calibrate_gyro_broken.eidos`,
       linked from `README.md`.
-- [ ] Root `CONTRIBUTING.md`: contributions go through GitHub Issues only.
-- [ ] Rename `crates/eidos-*` directories to `crates/tpt-eidos-*` to match the published
+- [x] Root `CONTRIBUTING.md`: contributions go through GitHub Issues only.
+- [x] Rename `crates/eidos-*` directories to `crates/tpt-eidos-*` to match the published
       crate names; update root `Cargo.toml` workspace members/paths and `AGENTS.md`'s
       workspace-layout tree.
-- [ ] Give each crate its own crates.io `keywords`/`categories` in its `Cargo.toml` instead
+- [x] Give each crate its own crates.io `keywords`/`categories` in its `Cargo.toml` instead
       of inheriting the shared `workspace.package` list.
-- [ ] `tpt-eidos-controls-math`: a second, non-aerospace domain-library crate (generic
+- [x] `tpt-eidos-controls-math`: a second, non-aerospace domain-library crate (generic
       control-systems primitives — output clamping, rate limiting) reusing the
       `Lemma`/`TrustedLemmas` pattern from `eidos-flight-math`, with an `examples/` fixture
       and an `eidos-tests` integration test.
+
+## Phase 7: Path to full spec (v2)
+> `spec.txt`'s full vision has three pillars the MVK deliberately doesn't attempt yet:
+> real-time (WCET) budget checking, a linearity/affine checker for hardware resources, and
+> genuine non-linear arithmetic (beyond the fixed named-lemma table). Each is roughly
+> crate-sized and touches the trusted kernel, so they're tracked and designed here
+> individually rather than bundled — 7c lands first (this pass); 7a/7b are design-only,
+> each its own future implementation session, so a soundness issue in one can't taint the
+> others.
+
+### 7a. WCET / `RealTime<Nms>` budget checker (design only)
+- [x] Extend the `effects` grammar (`eidos-parser/src/grammar.ebnf:12`, currently
+      `effects = "effects", "[", ident, { ",", ident }, "]"` — bare idents only,
+      `RealTime<2ms>` does not actually parse today) to accept a parameterized
+      `effect_atom = ident, [ "<", number, ident, ">" ]`; `Fun.effects` becomes
+      `Vec<Effect>` (`Effect { name, budget: Option<(f64, TimeUnit)> }`).
+- [x] `eidos-kernel`: a `CostModel` table of abstract cost units per `BinOp`/`UnOp`/known
+      method call (`.magnitude()`, `.map`, `eidos_sqrt`'s 32 Newton iterations, ...);
+      compute a worst-case cost bound by structural recursion over the expression tree.
+      `if/else` becomes two obligations (`cost(then) <= budget`, `cost(else) <= budget`),
+      reusing the existing `entails`/`unsat` linear-obligation machinery unchanged — no new
+      solver needed.
+- [x] Restrict v1 to non-recursive functions (recursive WCET bounding is a known hard
+      problem); `RealTime<N>` on a recursive function is a hard rejection, not a silent
+      skip.
+- [x] Document as an **abstract-cost proxy**, not a hardware-certified timing bound —
+      consistent with the project's existing DO-178C honesty in the Feasibility note above.
+- [x] **Milestone:** a function declaring `effects [RealTime<2ms>]` whose structural cost
+      exceeds a configured budget is rejected with a named WCET obligation failure; one
+      that fits is accepted.
+
+### 7b. Linearity/affine checker (design only)
+- [x] Surface syntax: a `linear` type modifier (e.g. `fn lock(r: linear Register) -> Unit`);
+      AST `Type` gains a `Linear(Box<Type>)` variant.
+- [x] New kernel pass `check_linearity(fun)`: tracks per-path usage counts for every
+      `linear`-typed binding. Sequential composition sums usage; `if/else` requires
+      **exactly one** use of each live linear variable on **both** branches (the same
+      substructural merge rule Rust's own move checker applies under conditionals — this
+      finally puts that guarantee in eidos source itself, not just at the erasure target,
+      closing the Phase-1 "lean on Rust's move semantics" deferral under Open design
+      questions above). `Lambda` bodies (`.map`/`.zip` closures) may not capture a linear
+      variable (the closure conceptually runs once per array element) — rejected outright.
+      Reject 0 uses ("unused linear resource") and 2+ uses on one path ("used more than
+      once").
+- [x] **Milestone:** a `linear` parameter used twice, unused, or captured inside `.map` is
+      rejected; used exactly once on every path is accepted.
+
+### 7c. Non-linear arithmetic via checked certificates — implemented this pass
+> Answers "could we do better than Z3?": embedding Z3 would contradict the TCB-purity
+> decision already on record above ("a heavier SMT solver... was rejected to keep the TCB
+> pure-`std` and CI offline") — Z3 is ~1M lines of unauditable C++, the opposite of
+> `spec.txt` §3.2's "transparent, minimal kernel" pillar. The better answer reuses the same
+> Generate→Verify split the project already uses for Phase-4 LLM proof suggestions: let
+> *anything* (a human, an LLM, or an out-of-band Z3/dReal run) **propose** a certificate;
+> trust nothing but a small, in-repo, exact-rational **checker**. This is strictly stronger
+> than trusting Z3 directly (Z3's own soundness is never part of the TCB either way) and
+> strictly more general than the fixed named-lemma table (covers any provable polynomial
+> fact, not just hand-picked ones).
+- [x] `eidos-verifier`: new private `poly` module — a sparse multivariate polynomial over
+      the existing exact `Rat` type, with exact `add`/`sub`/`mul`/`eval`.
+- [x] `eidos-verifier`: public `SosCertificate` type proving `bound - expr = Σ c_i * s_i²`
+      for proposer-supplied polynomials `s_i` and nonnegative rational coefficients `c_i`;
+      public `check_sos_certificate(claim, cert) -> bool` expands and checks the identity
+      exactly over `Rat` — pure arithmetic, no search, the entire new trusted surface.
+- [x] `eidos-flight-math::prover`: `ProofStep` gains `ProposeNonlinearCertificate`, checked
+      exactly like today's `StrengthenRequires`/`ApplyLemma` — never trusted without the
+      verifier's independent check.
+- [x] Retire the unsound `triangle_for_add` lemma (see "Known bugs" above) in favor of a
+      real `SosCertificate` for the triangle-inequality bound — closes that soundness gap
+      and is the first real exercise of the new mechanism.
+- [x] Tests: `check_sos_certificate` accepts a correct triangle-inequality certificate and
+      rejects a negative-coefficient certificate, a mismatched-expansion certificate, and
+      the old false-`K` case `triangle_for_add_accepts_false_bound` used to (wrongly)
+      accept.
+- [x] **Milestone:** general kernel-level "try a certificate for any non-linear obligation"
+      (beyond the agent-proposal path) — good follow-up, not required for this pass's
+      landing.
 
 ## Ideas: ease of use / innovation (directional, not scheduled)
 - Parse errors carry zero position info (no line/column anywhere in `ParseError`) — the

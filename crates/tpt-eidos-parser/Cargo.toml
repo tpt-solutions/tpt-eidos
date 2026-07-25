@@ -8,8 +8,8 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["parser", "lexer", "ast", "refinement-types", "no-std"]
+categories = ["parser-combinators", "compilers"]
 description = "Lexer, AST, and recursive-descent parser for the tpt-eidos language"
 
 [dependencies]

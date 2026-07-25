@@ -8,8 +8,8 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["eidos", "verification", "proof", "cli", "safety-critical"]
+categories = ["command-line-utilities", "compilers"]
 description = "Command-line entry point for tpt-eidos (eidos check / eidos build)"
 
 [[bin]]

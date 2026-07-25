@@ -1,0 +1,20 @@
+// Example: servo output with clamping.
+// Demonstrates the controls-math domain library.
+
+type Clamped = { v: f64 | v >= -1.0 && v <= 1.0 };
+
+// A simple PID output that is always clamped to [-1.0, 1.0].
+fn servo_output(error: f64, kp: f64) -> Clamped
+    requires kp >= 0.0
+{
+    let raw = error * kp;
+    if raw > 1.0 {
+        return { v: 1.0 } as Clamped;
+    } else {
+        if raw < -1.0 {
+            return { v: -1.0 } as Clamped;
+        } else {
+            return { v: raw } as Clamped;
+        }
+    }
+}

@@ -16,7 +16,7 @@ mod prover;
 pub use prover::{suggest_and_verify, ProofStep, SuggestOutcome};
 
 use tpt_eidos_kernel::{check_with, Lemma, Report, DEFAULT_LEMMAS};
-use tpt_eidos_parser::{parse, BinOp, Expr, Module};
+use tpt_eidos_parser::{parse, Module};
 
 /// The reusable flight-control primitives, as eidos source. Feed this to
 /// `parse` and `check_module` to confirm the domain library verifies.
@@ -32,14 +32,14 @@ pub static FLIGHT_LEMMAS: &[Lemma] = &[];
 /// Lemmas an external agent (e.g. an LLM proof synthesizer, see Phase 4) may
 /// *propose*. They are never trusted blindly: `suggest_and_verify` only accepts
 /// a step if the kernel re-verifies the resulting module, and even then the
-/// lemma's own side conditions must `entails`-prove. `triangle_for_add` admits
-/// `|a + b| <= K` via the triangle inequality; it is sound only when `K` is at
-/// least `|a| + |b|`, which the kernel cannot check, so it is gated behind the
-/// agent loop rather than enabled by default.
-pub static AGENT_LEMMAS: &[Lemma] = &[Lemma {
-    name: "triangle_for_add",
-    apply: lemma_triangle_for_add,
-}];
+/// lemma's own side conditions must `entails`-prove.
+///
+/// As of Phase 7c, `triangle_for_add` has been retired: its admission of
+/// `|a + b| <= K` for *any* K was unsound (bug #6). Non-linear obligations
+/// like the triangle inequality are now discharged via
+/// [`ProofStep::ProposeNonlinearCertificate`], which the verifier checks
+/// exactly over rationals.
+pub static AGENT_LEMMAS: &[Lemma] = &[];
 
 /// Combine the kernel default lemmas, the domain lemmas, and any extra
 /// agent-suggested lemmas into one registry.
@@ -67,43 +67,6 @@ pub fn check_source(src: &str) -> Result<Report, tpt_eidos_parser::ParseError> {
     Ok(check_module(&module))
 }
 
-/// `|a + b| <= K` is admitted (triangle inequality) when the receiver of
-/// `.magnitude()` is a sum. Returns no side conditions: the kernel cannot check
-/// that `K >= |a| + |b|`, so this lemma must be reviewed by a human / gated by
-/// the agent loop.
-fn lemma_triangle_for_add(pred: &Expr, _ctx: &[Constraint]) -> Option<Vec<Constraint>> {
-    if let Expr::Bin { op, a, .. } = pred {
-        if matches!(op, BinOp::Le | BinOp::Lt) {
-            if let Expr::Method { recv, name, args } = a.as_ref() {
-                if name == "magnitude" && args.is_empty() && is_elementwise_sum(recv) {
-                    return Some(vec![]);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// True if `e` is a sum `a + b` (used directly) or an element-wise sum produced
-/// by `e.zip(f).map(|(x, y)| x + y)` / `e.map(|x| x + c)`. These are the shapes
-/// the triangle inequality discharges via the `triangle_for_add` agent lemma.
-fn is_elementwise_sum(e: &Expr) -> bool {
-    match e {
-        Expr::Bin { op: BinOp::Add, .. } => true,
-        Expr::Method { name, args, .. } if name == "map" => match args.first() {
-            Some(Expr::Lambda { body, .. }) => {
-                matches!(body.as_ref(), Expr::Bin { op: BinOp::Add, .. })
-            }
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
-// `Constraint` appears in the lemma signatures even when a lemma admits with no
-// side conditions.
-use tpt_eidos_verifier::Constraint;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,12 +79,6 @@ mod tests {
 
     #[test]
     fn primitives_verify_under_domain_env() {
-        // The flight-control primitives verify under the standard domain
-        // environment (`check_module`). (The old name
-        // `primitives_rejected_without_domain_env` was misleading: the domain
-        // lemma set `FLIGHT_LEMMAS` is currently empty, so the domain
-        // environment and the bare kernel differ only by the agent-gated
-        // `AGENT_LEMMAS`, which are *not* on by default.)
         let module = parse(PRIMITIVES_EIDOS).expect("parse primitives");
         let r = check_module(&module);
         assert!(
@@ -131,30 +88,21 @@ mod tests {
         );
     }
 
-    // --- Bug #6: `triangle_for_add` admits any bound `K`, even a false one. ---
-    // This is a *documentation* regression test: it pins the current (unsound)
-    // behaviour so any future tightening of the lemma is forced to update it.
+    // --- Phase 7c: triangle_for_add retired ---
+
     #[test]
-    fn triangle_for_add_accepts_false_bound() {
-        // `s` is an elementwise sum whose magnitude is clearly not `<= 0.0`, yet
-        // the refinement demands `s.magnitude() <= 0.0`. With the agent lemma
-        // on, the kernel still accepts — `triangle_for_add` never checks that
-        // `K >= |a| + |b|` (bug #6).
+    fn retired_triangle_for_add_rejects_false_bound() {
+        // With triangle_for_add retired (bug #6 fixed), the false bound is
+        // now correctly rejected — no agent lemma admits it any more.
         let src = "type Zero = { s: Array<f64, 3> | s.magnitude() <= 0.0 };
 fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> Zero {
     return { s: a.zip(b).map(|(x, y)| x + y) } as Zero;
 }";
         let module = parse(src).expect("parse");
-        let r = check_module_with(&module, AGENT_LEMMAS);
+        let r = check_module_with(&module, &[]);
         assert!(
-            r.ok(),
-            "bug #6: triangle_for_add wrongly admits a false bound (should be unsound today)"
-        );
-        assert!(
-            r.obligations
-                .iter()
-                .any(|o| matches!(o.status, tpt_eidos_kernel::ObligationStatus::Trusted)),
-            "the false obligation was discharged by a trusted lemma"
+            !r.ok(),
+            "retired lemma must not admit false bound (bug #6 fixed)"
         );
     }
 

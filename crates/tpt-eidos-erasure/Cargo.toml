@@ -8,8 +8,8 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["erasure", "proof-terms", "type-system", "no-std", "compilers"]
+categories = ["compilers"]
 description = "Proof-term erasure for tpt-eidos: strip refinement witnesses from a kernel-checked module, producing a computational-core IR"
 
 [dependencies]

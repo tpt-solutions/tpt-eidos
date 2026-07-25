@@ -6,9 +6,15 @@
 //! lemma it invokes is checked by the kernel (`entails` on its side conditions).
 //! A suggestion is never trusted blindly — the compiler mathematically verifies
 //! or rejects it.
+//!
+//! Phase 7c adds `ProposeNonlinearCertificate`: instead of admitting an
+//! axiom via a `Lemma`, the agent supplies a sum-of-squares polynomial
+//! certificate that the verifier checks *exactly* over rationals — the
+//! certificate itself is the only new trusted surface.
 
 use tpt_eidos_kernel::{CheckError, Obligation, Report};
-use tpt_eidos_parser::{parse, parse_expr, BinOp, Expr, Fun, Item, Module};
+use tpt_eidos_parser::{parse, parse_expr, BinOp, Expr, ExprKind, Fun, Item, Module};
+use tpt_eidos_verifier::{check_sos_certificate, Poly, Rat, SosCertificate};
 
 use super::{Lemma, AGENT_LEMMAS};
 
@@ -21,6 +27,15 @@ pub enum ProofStep {
     /// Propose that an agent-gated trusted lemma (by name, from `AGENT_LEMMAS`)
     /// be admitted for this verification.
     ApplyLemma(String),
+    /// Propose a sum-of-squares certificate proving a polynomial identity.
+    /// The verifier checks the certificate *exactly* over rationals — the
+    /// certificate itself is the only new trusted surface.
+    ProposeNonlinearCertificate {
+        /// The polynomial identity target: `target == Σ cᵢ · sᵢ²`.
+        target: Poly,
+        /// `(coefficient cᵢ, witness polynomial sᵢ)` pairs.
+        terms: Vec<(Rat, Poly)>,
+    },
 }
 
 /// The kernel's verdict on a single proposed step.
@@ -51,6 +66,7 @@ pub fn suggest_and_verify(src: &str, steps: &[ProofStep]) -> Result<Vec<SuggestO
                             accepted: false,
                             errors: vec![CheckError {
                                 message: format!("bad step expression `{extra}`: {err}"),
+                                span: None,
                             }],
                             obligations: vec![],
                         });
@@ -70,6 +86,7 @@ pub fn suggest_and_verify(src: &str, steps: &[ProofStep]) -> Result<Vec<SuggestO
                             accepted: false,
                             errors: vec![CheckError {
                                 message: format!("unknown lemma `{name}`"),
+                                span: None,
                             }],
                             obligations: vec![],
                         });
@@ -78,6 +95,29 @@ pub fn suggest_and_verify(src: &str, steps: &[ProofStep]) -> Result<Vec<SuggestO
                 };
                 let report = super::check_module_with(&module, &[lemma]);
                 push_outcome(&mut out, step, &report);
+            }
+            ProofStep::ProposeNonlinearCertificate { target, terms } => {
+                let cert = SosCertificate {
+                    target: target.clone(),
+                    terms: terms.clone(),
+                };
+                let accepted = check_sos_certificate(&cert);
+                out.push(SuggestOutcome {
+                    step: step.clone(),
+                    accepted,
+                    errors: if accepted {
+                        vec![]
+                    } else {
+                        vec![CheckError {
+                            message: "SoS certificate check failed: \
+                                     identity does not hold exactly, or \
+                                     a coefficient is negative"
+                                .into(),
+                            span: None,
+                        }]
+                    },
+                    obligations: vec![],
+                });
             }
         }
     }
@@ -104,11 +144,11 @@ fn apply_strengthen(module: &Module, fn_name: &str, extra: &Expr) -> Module {
         .map(|it| match it {
             Item::Fn(f) if f.name == fn_name => {
                 let new_req = match &f.requires {
-                    Some(old) => Some(Expr::Bin {
+                    Some(old) => Some(Expr::new(ExprKind::Bin {
                         op: BinOp::And,
                         a: Box::new(old.clone()),
                         b: Box::new(extra.clone()),
-                    }),
+                    })),
                     None => Some(extra.clone()),
                 };
                 Item::Fn(Box::new(Fun {
@@ -125,6 +165,7 @@ fn apply_strengthen(module: &Module, fn_name: &str, extra: &Expr) -> Module {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tpt_eidos_verifier::Poly;
 
     #[test]
     fn strengthen_requires_accepted() {
@@ -157,26 +198,92 @@ mod tests {
     }
 
     #[test]
-    fn agent_lemma_accepted_for_sum_bound() {
-        let src = "type SumB = { s: Array<f64, 3> | s.magnitude() <= 2.0 };
-fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> SumB {
-    return { s: a.zip(b).map(|(x, y)| x + y) } as SumB;
-}";
-        // Without the agent lemma the obligation is non-linear and rejected.
-        let baseline = super::super::check_source(src).unwrap();
-        assert!(
-            !baseline.ok(),
-            "must be rejected without the proposed agent lemma"
-        );
-        // With the triangle_for_add lemma proposed, the kernel accepts.
+    fn retired_triangle_for_add_is_unknown() {
+        let src = "fn f(a: Array<f64, 3>) -> Array<f64, 3> { return a; }";
         let out =
             suggest_and_verify(src, &[ProofStep::ApplyLemma("triangle_for_add".into())]).unwrap();
+        assert!(!out[0].accepted);
+        assert!(out[0]
+            .errors
+            .iter()
+            .any(|e| e.message.contains("unknown lemma")));
+    }
+
+    #[test]
+    fn sos_certificate_accepted() {
+        // (a - b)^2 = a^2 - 2ab + b^2  (correct SoS identity)
+        let one = Rat::from_f64(1.0).unwrap();
+        let neg_two = Rat::from_f64(-2.0).unwrap();
+        let target = Poly::monomial(vec![("a".into(), 2)], one)
+            .checked_add(&Poly::monomial(
+                vec![("a".into(), 1), ("b".into(), 1)],
+                neg_two,
+            ))
+            .unwrap()
+            .checked_add(&Poly::monomial(vec![("b".into(), 2)], one))
+            .unwrap();
+        let s = Poly::monomial(vec![("a".into(), 1)], one)
+            .checked_add(&Poly::monomial(
+                vec![("b".into(), 1)],
+                one.checked_neg().unwrap(),
+            ))
+            .unwrap();
+        let src = "fn f(a: f64) -> f64 { return a; }";
+        let out = suggest_and_verify(
+            src,
+            &[ProofStep::ProposeNonlinearCertificate {
+                target,
+                terms: vec![(one, s)],
+            }],
+        )
+        .unwrap();
         assert_eq!(out.len(), 1);
         assert!(
             out[0].accepted,
-            "kernel should accept the agent-suggested lemma: {:?}",
+            "correct SoS certificate must be accepted: {:?}",
             out[0].errors
         );
+    }
+
+    #[test]
+    fn sos_certificate_negative_coeff_rejected() {
+        let one = Rat::from_f64(1.0).unwrap();
+        let neg_one = one.checked_neg().unwrap();
+        let target = Poly::monomial(vec![("x".into(), 2)], one);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let src = "fn f(x: f64) -> f64 { return x; }";
+        let out = suggest_and_verify(
+            src,
+            &[ProofStep::ProposeNonlinearCertificate {
+                target,
+                terms: vec![(neg_one, x)],
+            }],
+        )
+        .unwrap();
+        assert!(!out[0].accepted);
+        assert!(out[0]
+            .errors
+            .iter()
+            .any(|e| e.message.contains("SoS certificate check failed")));
+    }
+
+    #[test]
+    fn sos_certificate_mismatched_expansion_rejected() {
+        // Claim: 5 = 1 * x^2  (identity doesn't hold)
+        let one = Rat::from_f64(1.0).unwrap();
+        let five = Rat::from_f64(5.0).unwrap();
+        let target = Poly::from_rat(five);
+        let x = Poly::monomial(vec![("x".into(), 1)], one);
+        let src = "fn f(x: f64) -> f64 { return x; }";
+        let out = suggest_and_verify(
+            src,
+            &[ProofStep::ProposeNonlinearCertificate {
+                target,
+                terms: vec![(one, x)],
+            }],
+        )
+        .unwrap();
+        assert!(!out[0].accepted);
     }
 
     #[test]
@@ -192,8 +299,6 @@ fn f(a: Array<f64, 3>, b: Array<f64, 3>) -> SumB {
 
     #[test]
     fn malformed_extra_expr_reaches_error_path() {
-        // A malformed `extra` expression must be reported via the outcome error
-        // path, never panic or silently apply.
         let src = "fn div(x: f64) -> f64 { return x / x; }";
         let out = suggest_and_verify(
             src,

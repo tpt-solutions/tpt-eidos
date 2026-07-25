@@ -1,0 +1,56 @@
+// Generic control-systems primitives for tpt-eidos.
+// These are pre-verified building blocks for control-law implementation.
+
+// A clamped value: output is always in [-1.0, 1.0].
+type Clamped = { v: f64 | v >= -1.0 && v <= 1.0 };
+
+// Clamp a value to the range [-1.0, 1.0].
+fn clamp(x: f64) -> Clamped {
+    if x > 1.0 {
+        return { v: 1.0 } as Clamped;
+    } else {
+        if x < -1.0 {
+            return { v: -1.0 } as Clamped;
+        } else {
+            return { v: x } as Clamped;
+        }
+    }
+}
+
+// A bounded increment: the result stays within [-10.0, 10.0].
+type Bounded = { v: f64 | v >= -10.0 && v <= 10.0 };
+
+// Apply a bounded increment: add delta to current, clamped to [-10.0, 10.0].
+fn bounded_add(current: f64, delta: f64) -> Bounded
+    requires current >= -10.0 && current <= 10.0
+    ensures |result| result.v >= -10.0 && result.v <= 10.0
+{
+    let sum = current + delta;
+    if sum > 10.0 {
+        return { v: 10.0 } as Bounded;
+    } else {
+        if sum < -10.0 {
+            return { v: -10.0 } as Bounded;
+        } else {
+            return { v: sum } as Bounded;
+        }
+    }
+}
+
+// Rate limit: ensure the output changes by at most `limit` from `prev`.
+// Requires both prev and target are within [-5.0, 5.0] and limit is non-negative.
+// Returns a value within [-5.0, 5.0].
+fn rate_limit(prev: f64, target: f64, limit: f64) -> f64
+    requires prev >= -5.0 && prev <= 5.0 && limit >= 0.0 && limit <= 5.0
+{
+    let delta = target - prev;
+    if delta > limit {
+        return prev + limit;
+    } else {
+        if delta < -limit {
+            return prev - limit;
+        } else {
+            return target;
+        }
+    }
+}

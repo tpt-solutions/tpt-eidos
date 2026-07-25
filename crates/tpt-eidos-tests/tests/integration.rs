@@ -245,3 +245,58 @@ fn proof_suggestion_accepted_and_rejected() {
     .unwrap();
     assert!(!rejected[0].accepted, "kernel must reject the unsound step");
 }
+
+// --- tpt-eidos-controls-math integration tests ---
+
+fn controls_primitives_path() -> PathBuf {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(format!(
+        "{dir}/../../crates/tpt-eidos-controls-math/src/primitives.eidos"
+    ))
+}
+
+fn controls_example_path() -> PathBuf {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(format!(
+        "{dir}/../../crates/tpt-eidos-controls-math/examples/servo_output.eidos"
+    ))
+}
+
+#[test]
+fn controls_math_primitives_verify() {
+    let src = fs::read_to_string(controls_primitives_path()).expect("read controls primitives");
+    let module = parse(&src).expect("parse controls primitives");
+    let report = tpt_eidos_controls_math::check_module(&module);
+    assert!(
+        report.ok(),
+        "controls-math primitives rejected: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn controls_math_example_verifies() {
+    let src = fs::read_to_string(controls_example_path()).expect("read servo example");
+    let module = parse(&src).expect("parse servo example");
+    let report = tpt_eidos_controls_math::check_module(&module);
+    assert!(
+        report.ok(),
+        "controls-math example rejected: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn controls_math_primitives_emit_no_std_rust() {
+    let src = fs::read_to_string(controls_primitives_path()).expect("read controls primitives");
+    let module = parse(&src).expect("parse controls primitives");
+    let report = tpt_eidos_controls_math::check_module(&module);
+    assert!(report.ok(), "primitives rejected: {:?}", report.errors);
+    let core = erase(&module);
+    let rust = codegen(&core).expect("codegen");
+    assert!(rust.contains("#![no_std]"));
+    assert!(rust.contains("pub fn clamp"));
+    assert!(rust.contains("pub fn bounded_add"));
+    assert!(rust.contains("pub fn rate_limit"));
+    assert!(!rust.contains("Refine"));
+}

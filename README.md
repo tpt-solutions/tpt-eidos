@@ -20,6 +20,11 @@ cargo install tpt-eidos-cli
 
 This installs the `eidos` binary.
 
+## Quick start
+
+See [docs/getting-started.md](docs/getting-started.md) for an end-to-end
+walkthrough of `eidos check` and `eidos build`.
+
 ## Usage
 
 ```sh

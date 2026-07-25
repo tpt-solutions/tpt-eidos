@@ -1,5 +1,42 @@
 //! Abstract syntax for the tpt-eidos MVK surface language.
 
+/// A source location span: byte offset range within the source text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    /// Start byte offset (inclusive, 0-based).
+    pub lo: usize,
+    /// End byte offset (exclusive, 0-based).
+    pub hi: usize,
+}
+
+impl Span {
+    /// The zero span (used as a default when no source location is available).
+    pub fn none() -> Self {
+        Span { lo: 0, hi: 0 }
+    }
+}
+
+/// Time unit for WCET budget specifications.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeUnit {
+    /// Microseconds.
+    Us,
+    /// Milliseconds.
+    Ms,
+    /// Seconds.
+    S,
+}
+
+/// A single effect annotation on a function.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Effect {
+    /// The effect name (e.g. "Pure", "IO", "RealTime").
+    pub name: String,
+    /// Optional WCET budget: `(value, unit)` for parameterized effects
+    /// like `RealTime<2ms>`.
+    pub budget: Option<(f64, TimeUnit)>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     /// A primitive/base type, e.g. `f64`, `i64`, `bool`.
@@ -14,6 +51,9 @@ pub enum Type {
     },
     /// A named (aliased) type or a bare type identifier.
     Named(String),
+    /// A linear (affine) type: the value must be used exactly once on every
+    /// code path. `linear T` wraps an inner type `T`.
+    Linear(Box<Type>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,8 +87,9 @@ pub enum Pattern {
     Tuple(Vec<Pattern>),
 }
 
+/// The kind of an expression (all variants that used to be on `Expr`).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Expr {
+pub enum ExprKind {
     Num(f64),
     Bool(bool),
     Var(String),
@@ -104,6 +145,23 @@ pub enum Expr {
     Return(Box<Expr>),
 }
 
+/// A source-annotated expression: wraps an [`ExprKind`] with a [`Span`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+impl Expr {
+    /// Build an expression with a zero span (for generated / synthetic exprs).
+    pub fn new(kind: ExprKind) -> Self {
+        Expr {
+            kind,
+            span: Span::none(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fun {
     pub name: String,
@@ -111,7 +169,7 @@ pub struct Fun {
     pub ret: Type,
     pub requires: Option<Expr>,
     pub ensures: Option<Expr>,
-    pub effects: Vec<String>,
+    pub effects: Vec<Effect>,
     pub body: Expr,
 }
 

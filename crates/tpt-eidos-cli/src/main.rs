@@ -1,6 +1,7 @@
 //! `eidos` command-line tool.
 //!
 //! Usage:
+//!   eidos new <name>                 scaffold a new .eidos project
 //!   eidos check <file>              verify a `.eidos` source file
 //!   eidos build <file> --out-dir D  emit a verified `no_std` Rust crate (erasure + codegen)
 
@@ -10,6 +11,7 @@ use std::process::ExitCode;
 
 use tpt_eidos_flight_math::check_module;
 use tpt_eidos_parser::parse;
+use tpt_eidos_parser::Span;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,6 +36,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         "check" => cmd_check(args.get(1).map(String::as_str)),
+        "new" => cmd_new(args.get(1).map(String::as_str)),
         "build" => cmd_build(args),
         "" => Err(usage()),
         other => Err(format!("unknown subcommand `{other}`\n{}", usage())),
@@ -41,8 +44,79 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
 }
 
 fn usage() -> String {
-    "usage:\n  eidos check <file>\n  eidos build <file> --out-dir <dir>\n  eidos --version\n  eidos --help"
+    "usage:\n  eidos new <name>\n  eidos check <file>\n  eidos build <file> --out-dir <dir>\n  eidos --version\n  eidos --help"
         .to_string()
+}
+
+fn byte_to_line_col(src: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut col = 1;
+    for (i, c) in src.char_indices() {
+        if i >= offset {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+fn render_error(path: &str, src: &str, e: &tpt_eidos_kernel::CheckError) {
+    match e.span {
+        Some(Span { lo, .. }) if lo > 0 => {
+            let (line, col) = byte_to_line_col(src, lo);
+            eprintln!("  {}:{}:{}: error: {}", path, line, col, e.message);
+        }
+        _ => {
+            eprintln!("  error: {}", e.message);
+        }
+    }
+}
+
+fn render_parse_error(path: &str, src: &str, e: &tpt_eidos_parser::ParseError) {
+    match e.span {
+        Some(Span { lo, .. }) if lo > 0 => {
+            let (line, col) = byte_to_line_col(src, lo);
+            eprintln!("  {}:{}:{}: parse error: {}", path, line, col, e);
+        }
+        _ => {
+            eprintln!("  parse error: {}", e);
+        }
+    }
+}
+
+fn cmd_new(name: Option<&str>) -> Result<ExitCode, String> {
+    let name = name.ok_or_else(|| format!("new requires a project name\n{}", usage()))?;
+    let dir = PathBuf::from(name);
+    if dir.exists() {
+        return Err(format!("directory `{name}` already exists"));
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{name}`: {e}"))?;
+    let src_path = dir.join(format!("{name}.eidos"));
+    let src = "// A refined type: a normalized 3D vector.\n\
+         type NormalizedVector3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };\n\
+         \n\
+         // A verified function: division by zero is provably impossible.\n\
+         fn calibrate(raw: Array<f64, 3>, bias: Array<f64, 3>) -> NormalizedVector3\n\
+         requires raw.len() == 3 && bias.len() == 3\n\
+         ensures |result| result.v.magnitude() <= 1.0\n\
+         {\n\
+         let corrected = raw.zip(bias).map(|(r, b)| r - b);\n\
+         let mag = corrected.magnitude();\n\
+         if mag > 0.0 {\n\
+         return { v: corrected.map(|x| x / mag) } as NormalizedVector3;\n\
+         } else {\n\
+         return { v: [0.0, 0.0, 0.0] } as NormalizedVector3;\n\
+         }\n\
+         }\n"
+    .to_string();
+    fs::write(&src_path, &src).map_err(|e| format!("cannot write `{:?}`: {e}", src_path))?;
+    println!("eidos: scaffolded new project `{name}` in `{name}/`");
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Derive a valid Rust crate name from the source file path. Cargo package
@@ -77,7 +151,13 @@ fn crate_name(file: &str) -> String {
 fn cmd_check(path: Option<&str>) -> Result<ExitCode, String> {
     let path = path.ok_or_else(|| format!("check requires a file path\n{}", usage()))?;
     let src = fs::read_to_string(path).map_err(|e| format!("cannot read `{path}`: {e}"))?;
-    let module = parse(&src).map_err(|e| format!("parse error: {e}"))?;
+    let module = match parse(&src) {
+        Ok(m) => m,
+        Err(e) => {
+            render_parse_error(path, &src, &e);
+            return Ok(ExitCode::FAILURE);
+        }
+    };
     let report = check_module(&module);
     if report.ok() {
         println!("eidos: {}: verified ({})", path, count_ok(&report));
@@ -85,7 +165,7 @@ fn cmd_check(path: Option<&str>) -> Result<ExitCode, String> {
     } else {
         eprintln!("eidos: {}: REJECTED", path);
         for e in &report.errors {
-            eprintln!("  error: {}", e.message);
+            render_error(path, &src, e);
         }
         Ok(ExitCode::FAILURE)
     }
@@ -143,7 +223,13 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let src = fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
-    let module = parse(&src).map_err(|e| format!("parse error: {e}"))?;
+    let module = match parse(&src) {
+        Ok(m) => m,
+        Err(e) => {
+            render_parse_error(file, &src, &e);
+            return Ok(ExitCode::FAILURE);
+        }
+    };
     let report = check_module(&module);
     if !report.ok() {
         eprintln!(
@@ -151,7 +237,7 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
             file
         );
         for e in &report.errors {
-            eprintln!("  error: {}", e.message);
+            render_error(file, &src, e);
         }
         return Ok(ExitCode::FAILURE);
     }

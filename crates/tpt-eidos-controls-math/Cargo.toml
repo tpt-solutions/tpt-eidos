@@ -1,5 +1,5 @@
 [package]
-name = "tpt-eidos-flight-math"
+name = "tpt-eidos-controls-math"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,9 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords = ["flight-control", "quaternion", "pid", "aerospace", "verification"]
-categories = ["aerospace", "science", "mathematics"]
-description = "Pre-proved flight-control domain library for tpt-eidos (Phase 3)"
+keywords = ["control-systems", "clamping", "rate-limiting", "saturation", "verification"]
+categories = ["control-systems", "mathematics"]
+description = "Pre-proved generic control-systems domain library for tpt-eidos (output clamping, rate limiting, saturation)"
 
 [dependencies]
 tpt-eidos-kernel.workspace = true

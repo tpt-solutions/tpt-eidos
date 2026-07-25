@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use tpt_eidos_parser::{BinOp, Expr, Fun, Item, Module, Pattern, Type, UnOp};
+use tpt_eidos_parser::{BinOp, Expr, ExprKind, Fun, Item, Module, Pattern, Type, UnOp};
 
 /// A type with all refinement information stripped.
 #[derive(Clone, Debug, PartialEq)]
@@ -195,6 +195,7 @@ impl<'a> Eraser<'a> {
                 });
                 CoreType::Named(name)
             }
+            Type::Linear(inner) => self.erase_type(inner),
         }
     }
 
@@ -221,23 +222,23 @@ impl<'a> Eraser<'a> {
     }
 
     fn erase_expr(&mut self, e: &Expr, env: &mut HashMap<String, CoreType>) -> CExpr {
-        match e {
-            Expr::Num(n) => CExpr {
+        match &e.kind {
+            ExprKind::Num(n) => CExpr {
                 ty: CoreType::Base("f64".into()),
                 kind: CExprKind::Num(*n),
             },
-            Expr::Bool(b) => CExpr {
+            ExprKind::Bool(b) => CExpr {
                 ty: CoreType::Base("bool".into()),
                 kind: CExprKind::Bool(*b),
             },
-            Expr::Var(v) => {
+            ExprKind::Var(v) => {
                 let ty = env.get(v).cloned().unwrap_or(CoreType::Base("_".into()));
                 CExpr {
                     ty,
                     kind: CExprKind::Var(v.clone()),
                 }
             }
-            Expr::ArrayLit(es) => {
+            ExprKind::ArrayLit(es) => {
                 let mut cs = Vec::new();
                 let mut elem = CoreType::Base("_".into());
                 for x in es {
@@ -251,7 +252,7 @@ impl<'a> Eraser<'a> {
                     kind: CExprKind::ArrayLit(cs),
                 }
             }
-            Expr::Bin { op, a, b } => {
+            ExprKind::Bin { op, a, b } => {
                 let ca = self.erase_expr(a, env);
                 let cb = self.erase_expr(b, env);
                 let ty = if matches!(
@@ -278,7 +279,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Un { op, a } => {
+            ExprKind::Un { op, a } => {
                 let ca = self.erase_expr(a, env);
                 let ty = match op {
                     UnOp::Neg => CoreType::Base("f64".into()),
@@ -292,7 +293,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::If { cond, then, els } => {
+            ExprKind::If { cond, then, els } => {
                 let cc = self.erase_expr(cond, env);
                 let ct = self.erase_expr(then, env);
                 let ce = self.erase_expr(els, env);
@@ -306,7 +307,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Let { name, value, body } => {
+            ExprKind::Let { name, value, body } => {
                 let cv = self.erase_expr(value, env);
                 let vty = cv.ty.clone();
                 env.insert(name.clone(), vty);
@@ -321,7 +322,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Call { func, args } => {
+            ExprKind::Call { func, args } => {
                 let cargs: Vec<CExpr> = args.iter().map(|a| self.erase_expr(a, env)).collect();
                 let ty = self
                     .ret_of
@@ -336,7 +337,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Method { recv, name, args } => {
+            ExprKind::Method { recv, name, args } => {
                 let cr = self.erase_expr(recv, env);
                 let cargs: Vec<CExpr> = args.iter().map(|a| self.erase_expr(a, env)).collect();
                 let ty = self.method_type(&cr, name);
@@ -349,7 +350,7 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Lambda { params, body } => {
+            ExprKind::Lambda { params, body } => {
                 let cb = self.erase_expr(body, env);
                 let ty = cb.ty.clone();
                 CExpr {
@@ -360,16 +361,13 @@ impl<'a> Eraser<'a> {
                     },
                 }
             }
-            Expr::Record(fields) => {
+            ExprKind::Record(fields) => {
                 let mut cf = Vec::new();
                 let mut ty = CoreType::Base("_".into());
                 for (fnm, fv) in fields {
                     let c = self.erase_expr(fv, env);
                     cf.push((fnm.clone(), c));
                 }
-                // If this record is a refinement witness for a known struct, tag
-                // it with that struct's name so codegen emits a proper struct
-                // literal. This works for *any* bind name, not just "v" (bug #9).
                 if let Some(s) = self.structs.iter().find(|s| {
                     s.fields.len() == fields.len()
                         && s.fields
@@ -384,13 +382,13 @@ impl<'a> Eraser<'a> {
                     kind: CExprKind::Record(cf),
                 }
             }
-            Expr::Cast { value, ty } => {
+            ExprKind::Cast { value, ty } => {
                 let target = self.erase_type(ty);
                 let mut cv = self.erase_expr(value, env);
                 cv.ty = target;
                 cv
             }
-            Expr::Return(e) => {
+            ExprKind::Return(e) => {
                 let ce = self.erase_expr(e, env);
                 let ty = ce.ty.clone();
                 CExpr {

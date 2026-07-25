@@ -9,11 +9,13 @@ This repo implements **Phase 1: the Minimal Viable Kernel (MVK)** — the
 trusted refinement-type checker plus a transparent QF_LRA decision procedure —
 **Phase 2: the Eraser** — proof-term erasure to a computational core and
 codegen to `no_std` Rust — **Phase 3: the Domain Library**
-(`tpt-eidos-flight-math`, pre-proved flight-control primitives) — and
-**Phase 4: AI-Assisted Proof Synthesis** (`eidos-flight-math::prover`, kernel-
-gated agent proof-step suggestions). See `TODO.md` for the full phase-by-phase
-status, including Phase 5 (hardening) and Phase 6 (adoption/hardening
-follow-ups).
+(`tpt-eidos-flight-math`, pre-proved flight-control primitives) —
+**Phase 4: AI-Assisted Proof Synthesis** (`tpt-eidos-flight-math::prover`, kernel-
+gated agent proof-step suggestions) — and **Phase 7c: Non-linear arithmetic via
+checked certificates** (sparse polynomial `poly` module, `SosCertificate` +
+`check_sos_certificate` in the verifier, `ProposeNonlinearCertificate` proof step).
+See `TODO.md` for the full phase-by-phase status, including Phase 5 (hardening),
+Phase 6 (adoption/hardening follow-ups), and Phase 7a/7b (design-only).
 
 ## Workspace layout
 
@@ -21,16 +23,17 @@ follow-ups).
 spec.txt                 design doc (the language vision)
 TODO.md                  phased roadmap (source of truth for tasks)
 crates/
-  eidos-verifier/        QF_LRA Fourier-Motzkin decision procedure
+  tpt-eidos-verifier/    QF_LRA Fourier-Motzkin decision procedure
                          (unsat / entails / model / counterexample)
-  eidos-parser/          lexer + recursive-descent parser + AST
-                         (crates/eidos-parser/src/grammar.ebnf)
-  eidos-kernel/          trusted refinement-subtyping typechecker,
+                         + SosCertificate / check_sos_certificate
+  tpt-eidos-parser/      lexer + recursive-descent parser + AST
+                         (crates/tpt-eidos-parser/src/grammar.ebnf)
+  tpt-eidos-kernel/      trusted refinement-subtyping typechecker,
                          division-by-zero safety, termination check
-  eidos-cli/             `eidos check <file>` / `eidos build <file>`
-  eidos-erasure/        proof-term erasure to a computational-core IR
-  eidos-codegen/        lower erased IR to a `no_std` Rust crate
-  eidos-tests/           integration tests over examples/
+  tpt-eidos-cli/         `eidos check <file>` / `eidos build <file>`
+  tpt-eidos-erasure/     proof-term erasure to a computational-core IR
+  tpt-eidos-codegen/     lower erased IR to a `no_std` Rust crate
+  tpt-eidos-tests/       integration tests over examples/
 examples/
   calibrate_gyro.eidos          spec §4 worked example (must verify)
   calibrate_gyro_broken.eidos   same, missing the `mag > 0.0` guard (must reject)

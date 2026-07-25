@@ -8,8 +8,8 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["smt", "fourier-motzkin", "linear-arithmetic", "decision-procedure", "verification"]
+categories = ["mathematics", "science"]
 description = "Transparent QF_LRA decision procedure (Fourier-Motzkin) for tpt-eidos"
 
 [dependencies]
