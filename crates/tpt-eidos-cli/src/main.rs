@@ -35,16 +35,17 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             println!("{}", usage());
             Ok(ExitCode::SUCCESS)
         }
-        "check" => cmd_check(args.get(1).map(String::as_str)),
+        "check" => cmd_check(args),
         "new" => cmd_new(args.get(1).map(String::as_str)),
         "build" => cmd_build(args),
+        "test" => cmd_test(args),
         "" => Err(usage()),
         other => Err(format!("unknown subcommand `{other}`\n{}", usage())),
     }
 }
 
 fn usage() -> String {
-    "usage:\n  eidos new <name>\n  eidos check <file>\n  eidos build <file> --out-dir <dir>\n  eidos --version\n  eidos --help"
+    "usage:\n  eidos new <name>\n  eidos check <file> [--verbose] [--json] [--emit ast|core]\n  eidos build <file> --out-dir <dir> [--force] [--verbose] [--json]\n  eidos test <dir> [--verbose]\n  eidos --version\n  eidos --help"
         .to_string()
 }
 
@@ -148,24 +149,115 @@ fn crate_name(file: &str) -> String {
     name
 }
 
-fn cmd_check(path: Option<&str>) -> Result<ExitCode, String> {
-    let path = path.ok_or_else(|| format!("check requires a file path\n{}", usage()))?;
+fn cmd_check(args: &[String]) -> Result<ExitCode, String> {
+    let mut file: Option<&str> = None;
+    let mut verbose = false;
+    let mut json = false;
+    let mut emit: Option<&str> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--verbose" | "-v" => {
+                verbose = true;
+                i += 1;
+            }
+            "--json" | "-j" => {
+                json = true;
+                i += 1;
+            }
+            "--emit" => {
+                emit = Some(
+                    args.get(i + 1)
+                        .ok_or("--emit requires a value (ast or core)")?,
+                );
+                i += 2;
+            }
+            other if !other.starts_with('-') && file.is_none() => {
+                file = Some(other);
+                i += 1;
+            }
+            other => return Err(format!("unexpected check argument `{other}`")),
+        }
+    }
+    let path = file.ok_or_else(|| format!("check requires a file path\n{}", usage()))?;
     let src = fs::read_to_string(path).map_err(|e| format!("cannot read `{path}`: {e}"))?;
     let module = match parse(&src) {
         Ok(m) => m,
         Err(e) => {
-            render_parse_error(path, &src, &e);
+            if json {
+                println!(
+                    "{{\"status\":\"parse_error\",\"file\":\"{}\",\"error\":\"{}\"}}",
+                    json_escape(path),
+                    json_escape(&e.to_string())
+                );
+            } else {
+                render_parse_error(path, &src, &e);
+            }
             return Ok(ExitCode::FAILURE);
         }
     };
+
+    // Handle --emit flag before verification.
+    if let Some(target) = emit {
+        match target {
+            "ast" => {
+                println!("{:#?}", module);
+                return Ok(ExitCode::SUCCESS);
+            }
+            "core" => {
+                let report = check_module(&module);
+                if !report.ok() {
+                    if !json {
+                        eprintln!(
+                            "eidos: {}: REJECTED (cannot emit core for unverified code)",
+                            path
+                        );
+                    }
+                    return Ok(ExitCode::FAILURE);
+                }
+                let core = tpt_eidos_erasure::erase(&module);
+                println!("{:#?}", core);
+                return Ok(ExitCode::SUCCESS);
+            }
+            other => {
+                return Err(format!(
+                    "unknown emit target `{other}` (expected ast or core)"
+                ))
+            }
+        }
+    }
+
     let report = check_module(&module);
     if report.ok() {
-        println!("eidos: {}: verified ({})", path, count_ok(&report));
+        if json {
+            println!(
+                "{{\"status\":\"verified\",\"file\":\"{}\",\"obligations\":{}}}",
+                json_escape(path),
+                json_obligations(&report)
+            );
+        } else if verbose {
+            println!("eidos: {}: verified", path);
+            render_obligations(path, &report);
+        } else {
+            println!("eidos: {}: verified ({})", path, count_ok(&report));
+        }
         Ok(ExitCode::SUCCESS)
     } else {
-        eprintln!("eidos: {}: REJECTED", path);
-        for e in &report.errors {
-            render_error(path, &src, e);
+        if json {
+            println!(
+                "{{\"status\":\"rejected\",\"file\":\"{}\",\"errors\":[{}],\"obligations\":{}}}",
+                json_escape(path),
+                json_errors(path, &src, &report),
+                json_obligations(&report)
+            );
+        } else {
+            eprintln!("eidos: {}: REJECTED", path);
+            for e in &report.errors {
+                render_error(path, &src, e);
+            }
+            if verbose {
+                render_obligations(path, &report);
+            }
         }
         Ok(ExitCode::FAILURE)
     }
@@ -185,10 +277,221 @@ fn count_ok(report: &tpt_eidos_kernel::Report) -> String {
     format!("{verified} verified, {trusted} trusted-lemma")
 }
 
+fn render_obligations(_path: &str, report: &tpt_eidos_kernel::Report) {
+    for o in &report.obligations {
+        let tag = match o.status {
+            tpt_eidos_kernel::ObligationStatus::Verified => "Verified",
+            tpt_eidos_kernel::ObligationStatus::Trusted => "Trusted",
+            tpt_eidos_kernel::ObligationStatus::Unverified => "Unverified",
+        };
+        match o.span {
+            Some(Span { lo, .. }) if lo > 0 => {
+                eprintln!("  [{}] {}", tag, o.description);
+            }
+            _ => {
+                eprintln!("  [{}] {}", tag, o.description);
+            }
+        }
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < ' ' => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn json_obligations(report: &tpt_eidos_kernel::Report) -> String {
+    let items: Vec<String> = report
+        .obligations
+        .iter()
+        .map(|o| {
+            let status = match o.status {
+                tpt_eidos_kernel::ObligationStatus::Verified => "verified",
+                tpt_eidos_kernel::ObligationStatus::Trusted => "trusted",
+                tpt_eidos_kernel::ObligationStatus::Unverified => "unverified",
+            };
+            format!(
+                "{{\"status\":\"{}\",\"description\":\"{}\"}}",
+                status,
+                json_escape(&o.description)
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+fn json_errors(_path: &str, src: &str, report: &tpt_eidos_kernel::Report) -> String {
+    let items: Vec<String> = report
+        .errors
+        .iter()
+        .map(|e| {
+            let (line, col) = match e.span {
+                Some(Span { lo, .. }) if lo > 0 => byte_to_line_col(src, lo),
+                _ => (0, 0),
+            };
+            format!(
+                "{{\"line\":{},\"col\":{},\"message\":\"{}\"}}",
+                line,
+                col,
+                json_escape(&e.message)
+            )
+        })
+        .collect();
+    items.join(",")
+}
+
+fn cmd_test(args: &[String]) -> Result<ExitCode, String> {
+    let mut dir: Option<&str> = None;
+    let mut verbose = false;
+    let mut json = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--verbose" | "-v" => {
+                verbose = true;
+                i += 1;
+            }
+            "--json" | "-j" => {
+                json = true;
+                i += 1;
+            }
+            other if !other.starts_with('-') && dir.is_none() => {
+                dir = Some(other);
+                i += 1;
+            }
+            other => return Err(format!("unexpected test argument `{other}`")),
+        }
+    }
+    let dir = dir.ok_or_else(|| format!("test requires a directory\n{}", usage()))?;
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+    let mut results: Vec<String> = Vec::new();
+
+    let entries = fs::read_dir(dir).map_err(|e| format!("cannot read directory `{dir}`: {e}"))?;
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|ext| ext.to_string_lossy() == "eidos")
+        })
+        .collect();
+    files.sort();
+
+    for file in &files {
+        let path = file.to_string_lossy();
+        let src = match fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                failed += 1;
+                if json {
+                    results.push(format!(
+                        "{{\"file\":\"{}\",\"status\":\"error\",\"message\":\"{}\"}}",
+                        json_escape(&path),
+                        json_escape(&e.to_string())
+                    ));
+                } else {
+                    eprintln!("  FAIL {}: {}", path, e);
+                }
+                continue;
+            }
+        };
+        let module = match parse(&src) {
+            Ok(m) => m,
+            Err(e) => {
+                failed += 1;
+                if json {
+                    results.push(format!(
+                        "{{\"file\":\"{}\",\"status\":\"parse_error\",\"message\":\"{}\"}}",
+                        json_escape(&path),
+                        json_escape(&e.to_string())
+                    ));
+                } else {
+                    eprintln!("  FAIL {}: parse error: {}", path, e);
+                }
+                continue;
+            }
+        };
+        let report = check_module(&module);
+        if report.ok() {
+            passed += 1;
+            if json {
+                results.push(format!(
+                    "{{\"file\":\"{}\",\"status\":\"verified\",\"obligations\":{}}}",
+                    json_escape(&path),
+                    json_obligations(&report)
+                ));
+            } else if verbose {
+                eprintln!("  OK   {}", path);
+                for o in &report.obligations {
+                    let tag = match o.status {
+                        tpt_eidos_kernel::ObligationStatus::Verified => "Verified",
+                        tpt_eidos_kernel::ObligationStatus::Trusted => "Trusted",
+                        tpt_eidos_kernel::ObligationStatus::Unverified => "Unverified",
+                    };
+                    eprintln!("       [{}] {}", tag, o.description);
+                }
+            }
+        } else {
+            failed += 1;
+            if json {
+                results.push(format!(
+                    "{{\"file\":\"{}\",\"status\":\"rejected\",\"errors\":[{}],\"obligations\":{}}}",
+                    json_escape(&path),
+                    json_errors(&path, &src, &report),
+                    json_obligations(&report)
+                ));
+            } else {
+                eprintln!("  FAIL {}", path);
+                for e in &report.errors {
+                    render_error(&path, &src, e);
+                }
+            }
+        }
+    }
+
+    if json {
+        println!(
+            "{{\"passed\":{},\"failed\":{},\"results\":[{}]}}",
+            passed,
+            failed,
+            results.join(",")
+        );
+    } else {
+        println!(
+            "eidos: {} passed, {} failed ({} total)",
+            passed,
+            failed,
+            passed + failed
+        );
+    }
+
+    if failed > 0 {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
 fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     let mut file: Option<&str> = None;
     let mut out_dir: Option<String> = None;
     let mut force = false;
+    let mut verbose = false;
+    let mut json = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -198,6 +501,14 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
             }
             "--force" => {
                 force = true;
+                i += 1;
+            }
+            "--verbose" | "-v" => {
+                verbose = true;
+                i += 1;
+            }
+            "--json" | "-j" => {
+                json = true;
                 i += 1;
             }
             other if !other.starts_with('-') && file.is_none() => {
@@ -232,12 +543,21 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     };
     let report = check_module(&module);
     if !report.ok() {
-        eprintln!(
-            "eidos: {}: REJECTED (refusing to emit unverified code)",
-            file
-        );
-        for e in &report.errors {
-            render_error(file, &src, e);
+        if json {
+            println!(
+                "{{\"status\":\"rejected\",\"file\":\"{}\",\"errors\":[{}],\"obligations\":{}}}",
+                json_escape(file),
+                json_errors(file, &src, &report),
+                json_obligations(&report)
+            );
+        } else {
+            eprintln!(
+                "eidos: {}: REJECTED (refusing to emit unverified code)",
+                file
+            );
+            for e in &report.errors {
+                render_error(file, &src, e);
+            }
         }
         return Ok(ExitCode::FAILURE);
     }
@@ -245,7 +565,8 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     let dir = PathBuf::from(&out_dir);
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{out_dir}`: {e}"))?;
     let core = tpt_eidos_erasure::erase(&module);
-    let rust = tpt_eidos_codegen::codegen(&core).map_err(|e| format!("codegen failed: {e}"))?;
+    let rust = tpt_eidos_codegen::codegen_with_source(&core, Some(file))
+        .map_err(|e| format!("codegen failed: {e}"))?;
     let lib = dir.join("lib.rs");
     fs::write(&lib, &rust).map_err(|e| format!("cannot write `{:?}`: {e}", lib))?;
     let cargo = dir.join("Cargo.toml");
@@ -254,10 +575,23 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
         crate_name(file)
     );
     fs::write(&cargo, cargo_toml).map_err(|e| format!("cannot write `{:?}`: {e}", cargo))?;
-    println!(
-        "eidos: {}: emitted verified no_std crate to {} (lib.rs + Cargo.toml)",
-        file, out_dir
-    );
+    if json {
+        println!(
+            "{{\"status\":\"built\",\"file\":\"{}\",\"out_dir\":\"{}\",\"obligations\":{}}}",
+            json_escape(file),
+            json_escape(&out_dir),
+            json_obligations(&report)
+        );
+    } else {
+        if verbose {
+            println!("eidos: {}: verified", file);
+            render_obligations(file, &report);
+        }
+        println!(
+            "eidos: {}: emitted verified no_std crate to {} (lib.rs + Cargo.toml)",
+            file, out_dir
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 

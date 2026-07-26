@@ -475,8 +475,12 @@ impl<'a> Checker<'a> {
                 });
                 return;
             }
+            let ce = tpt_eidos_verifier::find_model(&[c]);
+            let detail = ce
+                .map(|m| format!(" counterexample: {:?}", m))
+                .unwrap_or_default();
             report.errors.push(CheckError {
-                message: format!("could not verify obligation: {desc}"),
+                message: format!("could not verify obligation: {desc}.{detail}"),
                 span,
             });
             report.obligations.push(Obligation {

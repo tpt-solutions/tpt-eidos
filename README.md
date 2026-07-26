@@ -25,6 +25,9 @@ This installs the `eidos` binary.
 See [docs/getting-started.md](docs/getting-started.md) for an end-to-end
 walkthrough of `eidos check` and `eidos build`.
 
+For a language overview, see [docs/language-tour.md](docs/language-tour.md).
+For practical recipes, see [docs/cookbook.md](docs/cookbook.md).
+
 ## Usage
 
 ```sh
