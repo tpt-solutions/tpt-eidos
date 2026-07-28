@@ -12,8 +12,11 @@ terms for zero-cost extraction to `no_std` Rust.
 The current release implements the **Minimal Viable Kernel (MVK)** plus the
 **Eraser**: a trusted refinement-type checker and a transparent QF_LRA decision
 procedure (Fourier–Motzkin), with proof-term erasure to a computational core and
-codegen to a `no_std` Rust crate. A pre-proved flight-control domain library
-(`tpt-eidos-flight-math`) is included.
+codegen to a `no_std` Rust crate. Pre-proved domain libraries for flight control
+(`tpt-eidos-flight-math`), generic control systems (`tpt-eidos-controls-math`),
+and medical dosing bounds (`tpt-eidos-medical`) are included, along with a
+minimal LSP server (`tpt-eidos-lsp`) and VS Code extension (`editors/vscode`)
+for editor diagnostics.
 
 ## Why eidos?
 
@@ -25,7 +28,7 @@ codegen to a `no_std` Rust crate. A pre-proved flight-control domain library
 | **CI fully offline** | Yes | No | No | No |
 | **Emit target** | `no_std` Rust | C#, Java, Go, Python, Rust | F#, OCaml, C | Haskell |
 | **Zero runtime cost** | Yes (proof terms erased) | Partial | Partial | Partial |
-| **Domain libraries** | flight-math, controls-math | — | — | — |
+| **Domain libraries** | flight-math, controls-math, medical | — | — | — |
 
 eidos trades general dependent types (Lean 4 / Coq / Idris level) for a small,
 auditable kernel that is fast to verify, offline-CI-friendly, and targets
@@ -56,6 +59,21 @@ eidos check examples/calibrate_gyro.eidos
 
 # Verify and emit a verified, erased no_std Rust crate (lib.rs + Cargo.toml)
 eidos build examples/calibrate_gyro.eidos --out-dir out/
+
+# Scaffold a new .eidos project (+ Cargo workspace wrapper)
+eidos new my_project
+
+# Format a .eidos file in place (--check for CI)
+eidos fmt examples/calibrate_gyro.eidos
+
+# Batch-verify every .eidos file in a directory
+eidos test examples/
+
+# Start the LSP server (JSON-RPC 2.0 over stdio)
+eidos lsp
+
+# Serve the web playground on localhost:7070
+eidos serve
 ```
 
 ## Pipeline
@@ -81,7 +99,11 @@ eidos build then runs:
 | `tpt-eidos-erasure` | Proof-term erasure to a computational-core IR |
 | `tpt-eidos-codegen` | Lower the erased core to a `no_std` Rust crate |
 | `tpt-eidos-flight-math` | Pre-proved flight-control domain library |
+| `tpt-eidos-controls-math` | Pre-proved generic control-systems domain library |
+| `tpt-eidos-medical` | Pre-proved medical dosing-bounds domain library |
+| `tpt-eidos-lsp` | Minimal Language Server Protocol server for `.eidos` files |
 | `tpt-eidos-cli` | The `eidos` command-line tool |
+| `tpt-eidos-tests` | Integration tests over the worked examples |
 
 ## Trust and scope
 

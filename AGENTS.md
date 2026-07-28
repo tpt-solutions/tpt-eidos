@@ -11,11 +11,16 @@ trusted refinement-type checker plus a transparent QF_LRA decision procedure —
 codegen to `no_std` Rust — **Phase 3: the Domain Library**
 (`tpt-eidos-flight-math`, pre-proved flight-control primitives) —
 **Phase 4: AI-Assisted Proof Synthesis** (`tpt-eidos-flight-math::prover`, kernel-
-gated agent proof-step suggestions) — and **Phase 7c: Non-linear arithmetic via
-checked certificates** (sparse polynomial `poly` module, `SosCertificate` +
-`check_sos_certificate` in the verifier, `ProposeNonlinearCertificate` proof step).
-See `TODO.md` for the full phase-by-phase status, including Phase 5 (hardening),
-Phase 6 (adoption/hardening follow-ups), and Phase 7a/7b (design-only).
+gated agent proof-step suggestions) — **Phase 6: Hardening & adoption**
+(`tpt-eidos-controls-math`, a second non-aerospace domain-library crate) —
+**Phase 7c: Non-linear arithmetic via checked certificates** (sparse polynomial
+`poly` module, `SosCertificate` + `check_sos_certificate` in the verifier,
+`ProposeNonlinearCertificate` proof step) — and **Phase 8: Adoption & Developer
+Experience** (`tpt-eidos-lsp`, a minimal JSON-RPC LSP server wired as
+`eidos lsp`; `eidos serve`, a web playground; `tpt-eidos-medical`, a third
+domain-library crate for dosing bounds). See `TODO.md` for the full
+phase-by-phase status, including Phase 5 (hardening) and Phase 7a/7b
+(design-only).
 
 ## Workspace layout
 
@@ -30,9 +35,13 @@ crates/
                          (crates/tpt-eidos-parser/src/grammar.ebnf)
   tpt-eidos-kernel/      trusted refinement-subtyping typechecker,
                          division-by-zero safety, termination check
-  tpt-eidos-cli/         `eidos check <file>` / `eidos build <file>`
+  tpt-eidos-cli/         `eidos check|build|test|fmt|new|lsp|serve <file>`
   tpt-eidos-erasure/     proof-term erasure to a computational-core IR
   tpt-eidos-codegen/     lower erased IR to a `no_std` Rust crate
+  tpt-eidos-flight-math/ pre-proved flight-control domain library
+  tpt-eidos-controls-math/ pre-proved generic control-systems domain library
+  tpt-eidos-medical/     pre-proved medical dosing-bounds domain library
+  tpt-eidos-lsp/         minimal JSON-RPC 2.0 LSP server (stdio), wired as `eidos lsp`
   tpt-eidos-tests/       integration tests over examples/
 examples/
   calibrate_gyro.eidos          spec §4 worked example (must verify)
