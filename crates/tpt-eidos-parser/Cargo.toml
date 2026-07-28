@@ -9,7 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 keywords = ["parser", "lexer", "ast", "refinement-types", "no-std"]
-categories = ["parser-combinators", "compilers"]
+categories = ["parsing", "compilers"]
 description = "Lexer, AST, and recursive-descent parser for the tpt-eidos language"
 
 [dependencies]

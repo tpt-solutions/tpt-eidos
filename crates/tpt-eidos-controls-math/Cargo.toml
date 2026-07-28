@@ -9,7 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 keywords = ["control-systems", "clamping", "rate-limiting", "saturation", "verification"]
-categories = ["control-systems", "mathematics"]
+categories = ["algorithms", "mathematics"]
 description = "Pre-proved generic control-systems domain library for tpt-eidos (output clamping, rate limiting, saturation)"
 
 [dependencies]
