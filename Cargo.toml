@@ -10,6 +10,8 @@ members = [
     "crates/tpt-eidos-tests",
     "crates/tpt-eidos-flight-math",
     "crates/tpt-eidos-controls-math",
+    "crates/tpt-eidos-medical",
+    "crates/tpt-eidos-lsp",
 ]
 
 [workspace.package]
@@ -32,6 +34,8 @@ tpt-eidos-erasure = { path = "crates/tpt-eidos-erasure", version = "0.2.0" }
 tpt-eidos-codegen = { path = "crates/tpt-eidos-codegen", version = "0.2.0" }
 tpt-eidos-flight-math = { path = "crates/tpt-eidos-flight-math", version = "0.2.0" }
 tpt-eidos-controls-math = { path = "crates/tpt-eidos-controls-math", version = "0.2.0" }
+tpt-eidos-medical = { path = "crates/tpt-eidos-medical", version = "0.2.0" }
+tpt-eidos-lsp = { path = "crates/tpt-eidos-lsp", version = "0.2.0" }
 
 [profile.release]
 opt-level = 3

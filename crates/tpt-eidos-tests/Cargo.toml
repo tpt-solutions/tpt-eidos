@@ -16,3 +16,4 @@ tpt-eidos-erasure.workspace = true
 tpt-eidos-codegen.workspace = true
 tpt-eidos-flight-math.workspace = true
 tpt-eidos-controls-math.workspace = true
+tpt-eidos-medical.workspace = true

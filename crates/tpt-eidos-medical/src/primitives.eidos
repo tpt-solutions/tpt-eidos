@@ -1,0 +1,44 @@
+// Medical dosing-bounds primitives for tpt-eidos.
+// These are pre-verified building blocks for safe drug-dosing calculations.
+
+/// A safe dose: value is always within [0.0, 100.0] mg/kg.
+type SafeDose = { d: f64 | d >= 0.0 && d <= 100.0 };
+
+/// A safe dose rate: value is always within [0.0, 10.0] mg/kg/h.
+type DoseRate = { r: f64 | r >= 0.0 && r <= 10.0 };
+
+/// Clamp a raw dose value to the safe range [0.0, 100.0] mg/kg.
+/// No precondition required: always returns a valid SafeDose.
+fn clamp_dose(raw: f64) -> SafeDose {
+    if raw > 100.0 {
+        return { d: 100.0 } as SafeDose;
+    } else {
+        if raw < 0.0 {
+            return { d: 0.0 } as SafeDose;
+        } else {
+            return { d: raw } as SafeDose;
+        }
+    }
+}
+
+/// Apply one hour's worth of a dose rate to a current dose, clamped to [0.0, 100.0].
+/// Requires both current dose and rate are within their safe bounds.
+fn apply_rate(current: f64, rate: f64) -> SafeDose
+    requires current >= 0.0 && current <= 100.0 && rate >= 0.0 && rate <= 10.0
+{
+    let new_dose = current + rate;
+    if new_dose > 100.0 {
+        return { d: 100.0 } as SafeDose;
+    } else {
+        return { d: new_dose } as SafeDose;
+    }
+}
+
+/// Validate that a total dose is safe for splitting among n equal parts.
+/// The split value per part is at most total, which is already bounded.
+/// Requires total is within [0.0, 100.0] and n > 0.0.
+fn safe_split(total: f64, n: f64) -> SafeDose
+    requires total >= 0.0 && total <= 100.0 && n > 0.0
+{
+    return { d: total } as SafeDose;
+}

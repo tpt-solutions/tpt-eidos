@@ -1,0 +1,22 @@
+[package]
+name = "tpt-eidos-medical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["refinement-types", "verification", "medical", "dosing", "safety"]
+categories = ["mathematics", "science"]
+description = "Pre-proved medical dosing-bounds primitives for tpt-eidos"
+
+[dependencies]
+tpt-eidos-kernel.workspace = true
+tpt-eidos-parser.workspace = true
+tpt-eidos-verifier.workspace = true
+
+[dev-dependencies]
+tpt-eidos-erasure.workspace = true
+tpt-eidos-codegen.workspace = true

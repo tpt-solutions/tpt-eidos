@@ -6,6 +6,8 @@
 //!   eidos build <file> --out-dir D  emit a verified `no_std` Rust crate (erasure + codegen)
 //!   eidos fmt <file>                format a `.eidos` source file (round-trip via AST)
 //!   eidos test <dir>                batch-verify all `.eidos` files in a directory
+//!   eidos lsp                       start the LSP server (JSON-RPC 2.0 over stdio)
+//!   eidos serve [--port P]          serve the web playground on localhost:P (default 7070)
 
 use std::fs;
 use std::path::PathBuf;
@@ -42,13 +44,15 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         "build" => cmd_build(args),
         "test" => cmd_test(args),
         "fmt" => cmd_fmt(args),
+        "lsp" => cmd_lsp(),
+        "serve" => cmd_serve(args),
         "" => Err(usage()),
         other => Err(format!("unknown subcommand `{other}`\n{}", usage())),
     }
 }
 
 fn usage() -> String {
-    "usage:\n  eidos new <name>\n  eidos check <file> [--verbose] [--json] [--emit ast|core]\n  eidos build <file> --out-dir <dir> [--force] [--verbose] [--json] [--run]\n  eidos test <dir> [--verbose] [--json]\n  eidos fmt <file> [--check]\n  eidos --version\n  eidos --help"
+    "usage:\n  eidos new <name>\n  eidos check <file> [--verbose] [--json] [--emit ast|core]\n  eidos build <file> --out-dir <dir> [--force] [--verbose] [--json] [--run]\n  eidos test <dir> [--verbose] [--json]\n  eidos fmt <file> [--check]\n  eidos lsp\n  eidos serve [--port <port>]\n  eidos --version\n  eidos --help"
         .to_string()
 }
 
@@ -707,6 +711,249 @@ fn cmd_fmt(args: &[String]) -> Result<ExitCode, String> {
         }
         Ok(ExitCode::SUCCESS)
     }
+}
+
+fn cmd_lsp() -> Result<ExitCode, String> {
+    tpt_eidos_lsp::run_lsp_server();
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_serve(args: &[String]) -> Result<ExitCode, String> {
+    let mut port: u16 = 7070;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--port" => {
+                port = args
+                    .get(i + 1)
+                    .ok_or("--port requires a value")?
+                    .parse()
+                    .map_err(|_| "--port value must be a number 1-65535")?;
+                i += 2;
+            }
+            other => return Err(format!("unexpected serve argument `{other}`")),
+        }
+    }
+
+    let addr = format!("127.0.0.1:{port}");
+    let listener =
+        std::net::TcpListener::bind(&addr).map_err(|e| format!("cannot bind to {addr}: {e}"))?;
+    println!("eidos: playground listening on http://{addr}/");
+    println!("eidos: press Ctrl-C to stop");
+
+    for stream in listener.incoming() {
+        let mut stream = match stream {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        handle_http_request(&mut stream);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn handle_http_request(stream: &mut std::net::TcpStream) {
+    use std::io::{BufRead, BufReader, Write};
+
+    let clone = match stream.try_clone() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut reader = BufReader::new(clone);
+
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    let request_line = request_line.trim().to_string();
+
+    // Read headers to find Content-Length.
+    let mut content_length: usize = 0;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).is_err() {
+            break;
+        }
+        let header = header.trim();
+        if header.is_empty() {
+            break;
+        }
+        if let Some(rest) = header.to_ascii_lowercase().strip_prefix("content-length:") {
+            content_length = rest.trim().parse().unwrap_or(0);
+        }
+    }
+
+    // Parse method and path.
+    let mut parts = request_line.splitn(3, ' ');
+    let method = parts.next().unwrap_or("");
+    let path = parts.next().unwrap_or("/");
+
+    let (status, content_type, body) = if method == "GET" && (path == "/" || path == "/index.html")
+    {
+        ("200 OK", "text/html; charset=utf-8", playground_html())
+    } else if method == "POST" && path == "/check" {
+        // Read body.
+        let mut body_bytes = vec![0u8; content_length.min(1 << 20)];
+        let mut pos = 0;
+        while pos < body_bytes.len() {
+            use std::io::Read;
+            match reader.read(&mut body_bytes[pos..]) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => pos += n,
+            }
+        }
+        let src = String::from_utf8_lossy(&body_bytes[..pos]).into_owned();
+        let result = serve_check(&src);
+        ("200 OK", "application/json; charset=utf-8", result)
+    } else {
+        ("404 Not Found", "text/plain", "not found\n".to_string())
+    };
+
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn serve_check(src: &str) -> String {
+    match parse(src) {
+        Err(e) => {
+            format!(
+                "{{\"status\":\"parse_error\",\"message\":\"{}\"}}",
+                json_escape(&e.to_string())
+            )
+        }
+        Ok(module) => {
+            let report = check_module(&module);
+            if report.ok() {
+                let n_verified = report
+                    .obligations
+                    .iter()
+                    .filter(|o| matches!(o.status, tpt_eidos_kernel::ObligationStatus::Verified))
+                    .count();
+                format!(
+                    "{{\"status\":\"verified\",\"obligations\":{},\"message\":\"All {n_verified} obligation(s) verified.\"}}",
+                    json_obligations(&report)
+                )
+            } else {
+                let errors: Vec<String> = report
+                    .errors
+                    .iter()
+                    .map(|e| format!("\"{}\"", json_escape(&e.message)))
+                    .collect();
+                format!(
+                    "{{\"status\":\"rejected\",\"obligations\":{},\"errors\":[{}]}}",
+                    json_obligations(&report),
+                    errors.join(",")
+                )
+            }
+        }
+    }
+}
+
+fn playground_html() -> String {
+    r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eidos playground</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+header { padding: 12px 20px; background: #1a1d2e; border-bottom: 1px solid #2d3148; display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 1.1rem; font-weight: 600; color: #a78bfa; }
+header span { font-size: 0.8rem; color: #64748b; }
+main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; overflow: hidden; }
+.pane { display: flex; flex-direction: column; overflow: hidden; }
+.pane-label { padding: 8px 16px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; background: #141624; border-bottom: 1px solid #2d3148; }
+#editor { flex: 1; width: 100%; background: #0f1117; color: #e2e8f0; border: none; border-right: 1px solid #2d3148; padding: 16px; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.875rem; line-height: 1.6; resize: none; outline: none; tab-size: 4; }
+#output { flex: 1; padding: 16px; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.85rem; line-height: 1.6; overflow-y: auto; white-space: pre-wrap; }
+footer { padding: 8px 20px; background: #141624; border-top: 1px solid #2d3148; display: flex; gap: 12px; align-items: center; }
+button { padding: 6px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.875rem; font-weight: 600; transition: background 0.15s; }
+#btn-check { background: #7c3aed; color: white; }
+#btn-check:hover { background: #6d28d9; }
+#btn-check:disabled { background: #4c1d95; opacity: 0.6; cursor: not-allowed; }
+.ok { color: #4ade80; }
+.err { color: #f87171; }
+.pending { color: #94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>eidos playground</h1>
+  <span>tpt-eidos proof-native systems language</span>
+</header>
+<main>
+  <div class="pane">
+    <div class="pane-label">Source (.eidos)</div>
+    <textarea id="editor" spellcheck="false">/// Divide x by y.
+/// Division safety requires y != 0.
+fn divide(x: f64, y: f64) -> f64
+requires y != 0.0
+ensures |result| result == x / y
+{
+    return x / y;
+}
+</textarea>
+  </div>
+  <div class="pane">
+    <div class="pane-label">Verification result</div>
+    <div id="output" class="pending">Press "Verify" to check your code.</div>
+  </div>
+</main>
+<footer>
+  <button id="btn-check">Verify</button>
+  <span id="status" style="font-size:0.8rem;color:#64748b;"></span>
+</footer>
+<script>
+const btn = document.getElementById('btn-check');
+const out = document.getElementById('output');
+const status = document.getElementById('status');
+const editor = document.getElementById('editor');
+
+editor.addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const s = editor.selectionStart;
+    editor.setRangeText('    ', s, s, 'end');
+  }
+});
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  out.className = 'pending';
+  out.textContent = 'Verifying...';
+  status.textContent = '';
+  try {
+    const t0 = performance.now();
+    const resp = await fetch('/check', { method: 'POST', body: editor.value });
+    const data = await resp.json();
+    const ms = (performance.now() - t0).toFixed(0);
+    status.textContent = `${ms}ms`;
+    if (data.status === 'verified') {
+      out.className = 'ok';
+      const obs = (data.obligations || []).map(o => `  [${o.status}] ${o.description}`).join('\n');
+      out.textContent = '✓ ' + data.message + (obs ? '\n\n' + obs : '');
+    } else if (data.status === 'rejected') {
+      out.className = 'err';
+      const errs = (data.errors || []).join('\n');
+      const obs = (data.obligations || []).map(o => `  [${o.status}] ${o.description}`).join('\n');
+      out.textContent = '✗ Rejected\n\n' + errs + (obs ? '\n\n' + obs : '');
+    } else {
+      out.className = 'err';
+      out.textContent = '✗ ' + (data.message || JSON.stringify(data));
+    }
+  } catch (e) {
+    out.className = 'err';
+    out.textContent = '✗ Network error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>"#.to_string()
 }
 
 #[cfg(test)]

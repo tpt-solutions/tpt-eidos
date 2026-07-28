@@ -246,6 +246,59 @@ fn proof_suggestion_accepted_and_rejected() {
     assert!(!rejected[0].accepted, "kernel must reject the unsound step");
 }
 
+// --- tpt-eidos-medical integration tests ---
+
+fn medical_primitives_path() -> PathBuf {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(format!(
+        "{dir}/../../crates/tpt-eidos-medical/src/primitives.eidos"
+    ))
+}
+
+fn medical_example_path() -> PathBuf {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(format!("{dir}/../../examples/medication_dose.eidos"))
+}
+
+#[test]
+fn medical_primitives_verify() {
+    let src = fs::read_to_string(medical_primitives_path()).expect("read medical primitives");
+    let module = parse(&src).expect("parse medical primitives");
+    let report = tpt_eidos_medical::check_module(&module);
+    assert!(
+        report.ok(),
+        "medical primitives rejected: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn medical_example_verifies() {
+    let src = fs::read_to_string(medical_example_path()).expect("read medication_dose example");
+    let module = parse(&src).expect("parse medication_dose example");
+    let report = tpt_eidos_medical::check_module(&module);
+    assert!(
+        report.ok(),
+        "medication_dose.eidos rejected: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn medical_primitives_emit_no_std_rust() {
+    let src = fs::read_to_string(medical_primitives_path()).expect("read medical primitives");
+    let module = parse(&src).expect("parse medical primitives");
+    let report = tpt_eidos_medical::check_module(&module);
+    assert!(report.ok(), "primitives rejected: {:?}", report.errors);
+    let core = erase(&module);
+    let rust = codegen(&core).expect("codegen");
+    assert!(rust.contains("#![no_std]"));
+    assert!(rust.contains("pub fn clamp_dose"));
+    assert!(rust.contains("pub fn apply_rate"));
+    assert!(rust.contains("pub fn safe_split"));
+    assert!(!rust.contains("Refine"));
+}
+
 // --- tpt-eidos-controls-math integration tests ---
 
 fn controls_primitives_path() -> PathBuf {

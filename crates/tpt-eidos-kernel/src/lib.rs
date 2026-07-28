@@ -509,8 +509,21 @@ impl<'a> Checker<'a> {
             });
             return;
         }
+        // Try to find a model satisfying the context as a "context witness" — not a
+        // true counterexample to the non-linear predicate, but a concrete assignment
+        // showing the context is consistent (so the obligation was genuinely needed).
+        let ctx_detail = if ctx.is_empty() {
+            String::new()
+        } else {
+            match tpt_eidos_verifier::find_model(ctx) {
+                Some(m) => format!(" context witness: {:?}", m),
+                None => " (context is unsatisfiable — obligation vacuously true)".to_string(),
+            }
+        };
         report.errors.push(CheckError {
-            message: format!("non-linear obligation not discharged by trusted lemmas: {desc}"),
+            message: format!(
+                "non-linear obligation not discharged by trusted lemmas or certificates: {desc}.{ctx_detail}"
+            ),
             span,
         });
         report.obligations.push(Obligation {

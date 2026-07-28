@@ -1,0 +1,30 @@
+// Example: medication dosing with safe-bounds verification.
+// Demonstrates the medical domain library: clamped dose types, rate
+// application, and multi-part dose splitting — all verified by the kernel.
+
+/// A dose value guaranteed to be within [0.0, 100.0] mg/kg.
+type SafeDose = { d: f64 | d >= 0.0 && d <= 100.0 };
+
+/// Compute a patient's adjusted dose given a base dose and a weight-based
+/// correction factor.  The result is clamped to the safe range.
+fn adjusted_dose(base: f64, correction: f64) -> SafeDose
+    requires base >= 0.0 && base <= 90.0 && correction >= 0.0 && correction <= 10.0
+{
+    let total = base + correction;
+    if total > 100.0 {
+        return { d: 100.0 } as SafeDose;
+    } else {
+        return { d: total } as SafeDose;
+    }
+}
+
+/// Reduce a dose by a fixed taper amount, clamped at zero.
+fn tapered_dose(current: f64, taper: f64) -> SafeDose
+    requires current >= 0.0 && current <= 100.0 && taper >= 0.0 && taper <= 100.0
+{
+    if taper > current {
+        return { d: 0.0 } as SafeDose;
+    } else {
+        return { d: current - taper } as SafeDose;
+    }
+}

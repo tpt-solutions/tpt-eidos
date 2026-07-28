@@ -1,0 +1,34 @@
+{
+  "name": "tpt-eidos",
+  "displayName": "eidos Language Support",
+  "description": "Syntax highlighting for the tpt-eidos proof-native systems language (.eidos files)",
+  "version": "0.2.0",
+  "publisher": "tpt-solutions",
+  "license": "Apache-2.0 OR MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "keywords": ["eidos", "refinement types", "verification", "proof", "systems"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tpt-solutions/tpt-eidos"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "eidos",
+        "aliases": ["eidos", "Eidos"],
+        "extensions": [".eidos"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "eidos",
+        "scopeName": "source.eidos",
+        "path": "./syntaxes/eidos.tmLanguage.json"
+      }
+    ]
+  }
+}

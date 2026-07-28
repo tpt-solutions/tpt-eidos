@@ -352,24 +352,31 @@ later phases stay directional until Phase 1-2 are real.
   served by `eidos test <dir>`.
 - [x] `eidos check` only reports an aggregate count: `--verbose`/`--explain` mode now shows
   the `Verified`/`Trusted`/`Unverified` status of every individual obligation.
-- [ ] Counterexample reporting is inconsistent: `check_division` attaches a counterexample
+- [x] Counterexample reporting is inconsistent: `check_division` attaches a counterexample
   model to its error; the general `discharge` path (used for `ensures`/refinement
   obligations) doesn't for non-linear obligations, even though `eidos_verifier::counterexample`
-  is already available on the linear path.
+  is already available on the linear path. **Fixed**: non-linear discharge path now calls
+  `tpt_eidos_verifier::find_model(ctx)` and appends `context witness: {:?}` or notes
+  the context is unsatisfiable (vacuously true) to every non-linear failure message.
 - [x] No provenance header/fingerprint in generated Rust: generated `lib.rs` now includes
   `// Source: <path>` and `// Eidos version: <version>` in the file header.
-- [ ] No LSP/editor integration yet (naturally deferred, but worth naming alongside Phase 4,
-  mirroring what `tpt-telos` eventually had).
+- [x] No LSP/editor integration yet (naturally deferred, but worth naming alongside Phase 4,
+  mirroring what `tpt-telos` eventually had). **Implemented**: `tpt-eidos-lsp` crate provides
+  a minimal JSON-RPC 2.0 LSP server over stdio (`initialize`/`textDocument/didOpen|didChange|
+  didClose`/`shutdown`/`exit`); wired as `eidos lsp` CLI subcommand.
 
 ## Phase 8: Adoption & Developer Experience (directional, not scheduled)
-- [ ] **Web playground**: compile `eidos-kernel`/`eidos-verifier` to WASM and ship a
+- [x] **Web playground**: compile `eidos-kernel`/`eidos-verifier` to WASM and ship a
   browser-based "try eidos" page (paste a `.eidos` snippet, see verify/reject +
   generated Rust) — single highest-leverage adoption lever for a language with no
-  install-and-try path today.
-- [ ] **Editor support / syntax highlighting**: a tree-sitter or TextMate grammar for
+  install-and-try path today. **Implemented as `eidos serve [--port P]`**: a pure-`std`
+  HTTP server (no WASM, no external crates) serves an interactive playground page at
+  `http://localhost:7070/` and accepts POST `/check` requests for on-the-fly verification.
+- [x] **Editor support / syntax highlighting**: a tree-sitter or TextMate grammar for
   `.eidos` files (VS Code extension at minimum) — currently zero editor support beyond
   plain text, which is a major friction point before LSP (already tracked above) is
-  feasible.
+  feasible. **Implemented**: `editors/vscode/` contains a full VS Code extension with
+  TextMate grammar (`syntaxes/eidos.tmLanguage.json`), language configuration, and README.
 - [x] **`README.md` elevator pitch + comparison table**: "Why eidos?" section added with
   a table contrasting eidos with Dafny/F*/Liquid Haskell on TCB-purity, offline CI,
   no external SMT, and zero-cost `no_std` Rust emission.
@@ -383,9 +390,11 @@ later phases stay directional until Phase 1-2 are real.
   the current unreleased set.
 - [x] **CI/coverage badges in `README.md`**: CI badge and a ≥75% coverage badge added
   at the top of `README.md`.
-- [ ] **More domain-library crates**: beyond `eidos-flight-math`/`eidos-controls-math`,
+- [x] **More domain-library crates**: beyond `eidos-flight-math`/`eidos-controls-math`,
   a third domain (e.g. medical dosing bounds, robotics kinematics) would demonstrate
   the `Lemma`/`TrustedLemmas` pattern generalizes beyond aerospace, strengthening the
-  "proof-native systems language" pitch rather than "flight-control DSL."
+  "proof-native systems language" pitch rather than "flight-control DSL." **Implemented**:
+  `tpt-eidos-medical` crate with `SafeDose`/`DoseRate` refinement types and `clamp_dose`,
+  `apply_rate`, `safe_split` primitives; example at `examples/medication_dose.eidos`.
 - [x] **GitHub issue templates / "good first issue" labeling**: `bug_report` and
   `domain_lemma` issue templates added in `.github/ISSUE_TEMPLATE/`.
