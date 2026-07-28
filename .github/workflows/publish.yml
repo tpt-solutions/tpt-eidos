@@ -1,0 +1,64 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Publish in strict dependency order.  Each `cargo publish` runs with
+      # --no-verify so Cargo doesn't try to recompile the crate (expensive and
+      # fragile in CI); the CI workflow already gates that.  We sleep 30 s
+      # between publishes so crates.io has time to index each crate before the
+      # next one resolves it as a dependency.
+
+      - name: Publish tpt-eidos-parser
+        run: cargo publish -p tpt-eidos-parser --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-verifier
+        run: cargo publish -p tpt-eidos-verifier --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-kernel
+        run: cargo publish -p tpt-eidos-kernel --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-erasure
+        run: cargo publish -p tpt-eidos-erasure --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-codegen
+        run: cargo publish -p tpt-eidos-codegen --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-flight-math
+        run: cargo publish -p tpt-eidos-flight-math --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-controls-math
+        run: cargo publish -p tpt-eidos-controls-math --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-medical
+        run: cargo publish -p tpt-eidos-medical --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-lsp
+        run: cargo publish -p tpt-eidos-lsp --no-verify
+      - run: sleep 30
+
+      - name: Publish tpt-eidos-cli
+        run: cargo publish -p tpt-eidos-cli --no-verify
