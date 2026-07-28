@@ -171,6 +171,8 @@ pub struct Fun {
     pub ensures: Option<Expr>,
     pub effects: Vec<Effect>,
     pub body: Expr,
+    /// Doc comment lines from the source (`///` prefixed lines), joined with newlines.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

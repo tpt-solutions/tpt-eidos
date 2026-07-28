@@ -94,6 +94,8 @@ pub struct CoreFun {
     pub params: Vec<(String, CoreType)>,
     pub ret: CoreType,
     pub body: CExpr,
+    /// Doc comment from the eidos source (carried through for codegen).
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -218,6 +220,7 @@ impl<'a> Eraser<'a> {
             params,
             ret,
             body,
+            doc: f.doc.clone(),
         }
     }
 

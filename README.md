@@ -1,5 +1,8 @@
 # tpt-eidos
 
+[![CI](https://github.com/tpt-solutions/tpt-eidos/actions/workflows/ci.yml/badge.svg)](https://github.com/tpt-solutions/tpt-eidos/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A575%25-brightgreen)](https://github.com/tpt-solutions/tpt-eidos/actions/workflows/ci.yml)
+
 **Proof-native, dependently-typed systems language for safety-critical code.**
 
 `tpt-eidos` is a compiler that is also a theorem prover: it refuses to emit code
@@ -11,6 +14,23 @@ The current release implements the **Minimal Viable Kernel (MVK)** plus the
 procedure (Fourier–Motzkin), with proof-term erasure to a computational core and
 codegen to a `no_std` Rust crate. A pre-proved flight-control domain library
 (`tpt-eidos-flight-math`) is included.
+
+## Why eidos?
+
+| | eidos (MVK) | Dafny | F* | Liquid Haskell |
+|---|---|---|---|---|
+| **Verification approach** | Refinement types + QF_LRA | Hoare logic + SMT | Dependent types + SMT | Refinement types + SMT |
+| **External SMT solver** | No — in-repo Fourier-Motzkin | Yes (Z3) | Yes (Z3 / CVC4) | Yes (Z3) |
+| **TCB** | Pure `std` Rust, auditable in-repo | Z3 (~1 M lines C++) | Z3 / F* kernel | GHC + Z3 |
+| **CI fully offline** | Yes | No | No | No |
+| **Emit target** | `no_std` Rust | C#, Java, Go, Python, Rust | F#, OCaml, C | Haskell |
+| **Zero runtime cost** | Yes (proof terms erased) | Partial | Partial | Partial |
+| **Domain libraries** | flight-math, controls-math | — | — | — |
+
+eidos trades general dependent types (Lean 4 / Coq / Idris level) for a small,
+auditable kernel that is fast to verify, offline-CI-friendly, and targets
+`no_std` embedded Rust directly. The non-linear arithmetic gap (beyond QF_LRA)
+is closed by exact-rational SoS certificates rather than a black-box SMT oracle.
 
 ## Install
 
@@ -71,6 +91,10 @@ procedure; a small, reviewable set of non-linear facts is admitted via named
 trusted lemmas whose use is recorded in the verification report. The toolchain is
 pure `std` with no external crate dependencies, so the trusted computing base is
 auditable and CI runs fully offline.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for user-visible changes per release.
 
 ## License
 

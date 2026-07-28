@@ -102,6 +102,7 @@ enum Tok {
     And,
     Or,
     Not,
+    DocComment(String),
 }
 
 fn is_base_type(s: &str) -> bool {
@@ -152,9 +153,33 @@ impl Lexer {
                 continue;
             }
             if c == '/' && char_idx + 1 < chars.len() && chars[char_idx + 1] == '/' {
+                let is_doc = char_idx + 2 < chars.len()
+                    && chars[char_idx + 2] == '/'
+                    && !(char_idx + 3 < chars.len() && chars[char_idx + 3] == '/');
+                let start = byte_pos;
+                // skip past `//` (or `///`)
+                let prefix_len = if is_doc { 3 } else { 2 };
+                for _ in 0..prefix_len {
+                    byte_pos += chars[char_idx].len_utf8();
+                    char_idx += 1;
+                }
+                // skip one leading space after `///` if present
+                if is_doc && char_idx < chars.len() && chars[char_idx] == ' ' {
+                    byte_pos += 1;
+                    char_idx += 1;
+                }
+                let text_start_idx = char_idx;
                 while char_idx < chars.len() && chars[char_idx] != '\n' {
                     byte_pos += chars[char_idx].len_utf8();
                     char_idx += 1;
+                }
+                if is_doc {
+                    let text: String = chars[text_start_idx..char_idx].iter().collect();
+                    let pos = start;
+                    toks.push(SpannedTok {
+                        tok: Tok::DocComment(text),
+                        pos,
+                    });
                 }
                 continue;
             }
@@ -353,12 +378,23 @@ impl Parser {
     fn parse_module(&mut self) -> Result<Module, ParseError> {
         let mut items = Vec::new();
         while self.peek().is_some() {
-            items.push(self.parse_item()?);
+            let mut doc_lines: Vec<String> = Vec::new();
+            while matches!(self.peek(), Some(Tok::DocComment(_))) {
+                if let Some(Tok::DocComment(s)) = self.advance() {
+                    doc_lines.push(s);
+                }
+            }
+            let doc = if doc_lines.is_empty() {
+                None
+            } else {
+                Some(doc_lines.join("\n"))
+            };
+            items.push(self.parse_item(doc)?);
         }
         Ok(Module { items })
     }
 
-    fn parse_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_item(&mut self, doc: Option<String>) -> Result<Item, ParseError> {
         match self.peek() {
             Some(Tok::Type) => {
                 self.advance();
@@ -483,6 +519,7 @@ impl Parser {
                     ensures,
                     effects,
                     body,
+                    doc,
                 })))
             }
             _ => {

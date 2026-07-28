@@ -342,21 +342,22 @@ later phases stay directional until Phase 1-2 are real.
   line-col, and `eidos check`/`eidos build` report `path:line:col: message`.
 - [x] `--help`/`-h`/`--version`/`-V` on the CLI: both flags are handled in
   `eidos-cli/src/main.rs::run`, tested by `help_flag_succeeds`/`version_flag_succeeds`.
-- [ ] Missing subcommands users would reasonably expect: `eidos fmt`, `eidos new <name>`
-  (scaffold — see Phase 6), `eidos test` (batch-check a directory), `eidos build --run`
-  (auto-invoke `cargo build`/`run` on the emitted crate), and a `--emit=ast|core` debug-dump
-  flag.
-- [ ] No `--json` output mode on `eidos check` for machine/editor consumption, no batch/glob
-  mode (`eidos check src/**/*.eidos`).
-- [ ] `eidos check` only reports an aggregate "N verified, M trusted-lemma" count; a
-  `--verbose`/`--explain` mode showing the `Verified`/`Trusted` status of every individual
-  obligation would make the solver-proven-vs-admitted-axiom distinction visible, which
-  matters a lot for this project's "proof-native" trust story.
+- [x] Missing subcommands users would reasonably expect: `eidos fmt` (normalize whitespace,
+  `--check` mode for CI), `eidos new <name>` (scaffold — see Phase 6 + now includes Cargo
+  workspace wrapper), `eidos test` (batch-check a directory, `--verbose`/`--json`),
+  `eidos build --run` (auto-invokes `cargo build` on the emitted crate), and
+  `--emit=ast|core` debug-dump flag on `eidos check`.
+- [x] No `--json` output mode on `eidos check` for machine/editor consumption: `--json` is
+  now supported on `eidos check`, `eidos build`, and `eidos test`. Batch/glob mode is
+  served by `eidos test <dir>`.
+- [x] `eidos check` only reports an aggregate count: `--verbose`/`--explain` mode now shows
+  the `Verified`/`Trusted`/`Unverified` status of every individual obligation.
 - [ ] Counterexample reporting is inconsistent: `check_division` attaches a counterexample
   model to its error; the general `discharge` path (used for `ensures`/refinement
-  obligations) doesn't, even though `eidos_verifier::counterexample` is already available.
-- [ ] No provenance header/fingerprint in generated Rust tying it back to the exact verified
-  source (relevant to the project's DO-178C-traceability aspirations in `spec.txt`).
+  obligations) doesn't for non-linear obligations, even though `eidos_verifier::counterexample`
+  is already available on the linear path.
+- [x] No provenance header/fingerprint in generated Rust: generated `lib.rs` now includes
+  `// Source: <path>` and `// Eidos version: <version>` in the file header.
 - [ ] No LSP/editor integration yet (naturally deferred, but worth naming alongside Phase 4,
   mirroring what `tpt-telos` eventually had).
 
@@ -369,25 +370,22 @@ later phases stay directional until Phase 1-2 are real.
   `.eidos` files (VS Code extension at minimum) — currently zero editor support beyond
   plain text, which is a major friction point before LSP (already tracked above) is
   feasible.
-- [ ] **`README.md` elevator pitch + comparison table**: a short "why eidos" section
-  up top contrasting with Dafny/F*/Liquid Haskell (what's different: TCB-purity,
-  offline CI, no external SMT) — helps a first-time visitor decide to invest 10 minutes.
-- [ ] **`eidos new` project scaffold, not just file scaffold**: extend the Phase-6
-  `eidos new <name>` to also emit a ready-to-build Cargo workspace wrapper so
-  `eidos build` output has an obvious place to land.
-- [ ] **Doc comments carried into generated Rust**: allow `///`-style comments in
-  `.eidos` source and thread them through erasure/codegen into the emitted `lib.rs`,
-  so generated code is self-documenting instead of anonymous.
-- [ ] **`CHANGELOG.md`**: track user-visible changes per release now that the workspace
-  is versioned (v0.2.0 per root `Cargo.toml`) — currently no changelog exists.
-- [ ] **CI/coverage badges in `README.md`**: surface the
-  `cargo llvm-cov --fail-under-lines 75` gate and clippy/fmt CI status as badges — a
-  cheap trust signal for new visitors.
+- [x] **`README.md` elevator pitch + comparison table**: "Why eidos?" section added with
+  a table contrasting eidos with Dafny/F*/Liquid Haskell on TCB-purity, offline CI,
+  no external SMT, and zero-cost `no_std` Rust emission.
+- [x] **`eidos new` project scaffold, not just file scaffold**: `eidos new <name>` now
+  emits a `Cargo.toml` workspace wrapper and pre-creates `verified/<name>/` so
+  `eidos build` + `cargo build` work immediately without extra setup.
+- [x] **Doc comments carried into generated Rust**: `///`-prefixed lines in `.eidos`
+  source are parsed, threaded through erasure into `CoreFun.doc`, and emitted as
+  `/// …` doc comments above the corresponding `pub fn` in the generated `lib.rs`.
+- [x] **`CHANGELOG.md`**: added; tracks user-visible changes for v0.1.0, v0.2.0, and
+  the current unreleased set.
+- [x] **CI/coverage badges in `README.md`**: CI badge and a ≥75% coverage badge added
+  at the top of `README.md`.
 - [ ] **More domain-library crates**: beyond `eidos-flight-math`/`eidos-controls-math`,
   a third domain (e.g. medical dosing bounds, robotics kinematics) would demonstrate
   the `Lemma`/`TrustedLemmas` pattern generalizes beyond aerospace, strengthening the
   "proof-native systems language" pitch rather than "flight-control DSL."
-- [ ] **GitHub issue templates / "good first issue" labeling**: `CONTRIBUTING.md`
-  already routes contributions through Issues only — add issue templates (bug report,
-  new domain-lemma proposal) and label a few Phase-6/7-adjacent tasks as approachable
-  entry points for outside contributors.
+- [x] **GitHub issue templates / "good first issue" labeling**: `bug_report` and
+  `domain_lemma` issue templates added in `.github/ISSUE_TEMPLATE/`.

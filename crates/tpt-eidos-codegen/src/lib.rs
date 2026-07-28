@@ -134,6 +134,12 @@ fn gen_struct(s: &StructDef) -> String {
 }
 
 fn gen_fun(f: &CoreFun) -> Result<String, String> {
+    let mut out = String::new();
+    if let Some(doc) = &f.doc {
+        for line in doc.lines() {
+            out.push_str(&format!("/// {line}\n"));
+        }
+    }
     let params = f
         .params
         .iter()
@@ -142,13 +148,14 @@ fn gen_fun(f: &CoreFun) -> Result<String, String> {
         .join(", ");
     let ret = gen_type(&f.ret);
     let body = gen_block(&f.body, 1)?;
-    Ok(format!(
+    out.push_str(&format!(
         "pub fn {} ({}) -> {} {{\n{}}}\n",
         ident(&f.name),
         params,
         ret,
         body
-    ))
+    ));
+    Ok(out)
 }
 
 fn gen_type(t: &CoreType) -> String {
@@ -561,5 +568,31 @@ mod tests {
             "magnitude([3,4,0]) wrong: {}",
             nums[3]
         );
+    }
+
+    #[test]
+    fn doc_comments_emitted_in_generated_rust() {
+        let out = gen_src(
+            "/// Compute the sum of two values.\n\
+             /// Both inputs must be finite.\n\
+             fn add(a: f64, b: f64) -> f64 { return a + b; }",
+        );
+        assert!(
+            out.contains("/// Compute the sum of two values."),
+            "missing first doc line; got:\n{out}"
+        );
+        assert!(
+            out.contains("/// Both inputs must be finite."),
+            "missing second doc line; got:\n{out}"
+        );
+        let doc_pos = out.find("/// Compute").unwrap();
+        let fn_pos = out.find("pub fn add").unwrap();
+        assert!(doc_pos < fn_pos, "doc comment must precede fn");
+    }
+
+    #[test]
+    fn no_doc_comment_emitted_when_none() {
+        let out = gen_src("fn f(a: f64) -> f64 { return a; }");
+        assert!(!out.contains("///"), "unexpected doc comment; got:\n{out}");
     }
 }

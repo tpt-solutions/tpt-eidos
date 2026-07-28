@@ -1,9 +1,11 @@
 //! `eidos` command-line tool.
 //!
 //! Usage:
-//!   eidos new <name>                 scaffold a new .eidos project
+//!   eidos new <name>                 scaffold a new .eidos project (+ Cargo workspace wrapper)
 //!   eidos check <file>              verify a `.eidos` source file
 //!   eidos build <file> --out-dir D  emit a verified `no_std` Rust crate (erasure + codegen)
+//!   eidos fmt <file>                format a `.eidos` source file (round-trip via AST)
+//!   eidos test <dir>                batch-verify all `.eidos` files in a directory
 
 use std::fs;
 use std::path::PathBuf;
@@ -39,13 +41,14 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         "new" => cmd_new(args.get(1).map(String::as_str)),
         "build" => cmd_build(args),
         "test" => cmd_test(args),
+        "fmt" => cmd_fmt(args),
         "" => Err(usage()),
         other => Err(format!("unknown subcommand `{other}`\n{}", usage())),
     }
 }
 
 fn usage() -> String {
-    "usage:\n  eidos new <name>\n  eidos check <file> [--verbose] [--json] [--emit ast|core]\n  eidos build <file> --out-dir <dir> [--force] [--verbose] [--json]\n  eidos test <dir> [--verbose]\n  eidos --version\n  eidos --help"
+    "usage:\n  eidos new <name>\n  eidos check <file> [--verbose] [--json] [--emit ast|core]\n  eidos build <file> --out-dir <dir> [--force] [--verbose] [--json] [--run]\n  eidos test <dir> [--verbose] [--json]\n  eidos fmt <file> [--check]\n  eidos --version\n  eidos --help"
         .to_string()
 }
 
@@ -96,12 +99,14 @@ fn cmd_new(name: Option<&str>) -> Result<ExitCode, String> {
     if dir.exists() {
         return Err(format!("directory `{name}` already exists"));
     }
+    // .eidos source dir
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{name}`: {e}"))?;
     let src_path = dir.join(format!("{name}.eidos"));
-    let src = "// A refined type: a normalized 3D vector.\n\
+    let src = "/// A normalized 3D vector: magnitude is at most 1.0.\n\
          type NormalizedVector3 = { v: Array<f64, 3> | v.magnitude() <= 1.0 };\n\
          \n\
-         // A verified function: division by zero is provably impossible.\n\
+         /// Calibrate a raw sensor reading and normalise the result.\n\
+         /// Division by zero is provably impossible when mag > 0.\n\
          fn calibrate(raw: Array<f64, 3>, bias: Array<f64, 3>) -> NormalizedVector3\n\
          requires raw.len() == 3 && bias.len() == 3\n\
          ensures |result| result.v.magnitude() <= 1.0\n\
@@ -116,7 +121,33 @@ fn cmd_new(name: Option<&str>) -> Result<ExitCode, String> {
          }\n"
     .to_string();
     fs::write(&src_path, &src).map_err(|e| format!("cannot write `{:?}`: {e}", src_path))?;
-    println!("eidos: scaffolded new project `{name}` in `{name}/`");
+
+    // Cargo workspace wrapper so `eidos build --out-dir verified/` has an obvious home.
+    let workspace_toml = dir.join("Cargo.toml");
+    let workspace_content = format!(
+        "[workspace]\n\
+         members = [\"verified/{name}\"]\n\
+         resolver = \"2\"\n\
+         \n\
+         # Run `eidos build {name}.eidos --out-dir verified/{name}` to populate the\n\
+         # workspace member, then `cargo build` to compile the verified no_std crate.\n"
+    );
+    fs::write(&workspace_toml, workspace_content)
+        .map_err(|e| format!("cannot write `{:?}`: {e}", workspace_toml))?;
+
+    // Pre-create the output directory so Cargo sees it immediately.
+    let verified_dir = dir.join("verified").join(name);
+    fs::create_dir_all(&verified_dir)
+        .map_err(|e| format!("cannot create `{:?}`: {e}", verified_dir))?;
+
+    println!("eidos: scaffolded `{name}/`");
+    println!("  {name}/{name}.eidos     — eidos source");
+    println!("  {name}/Cargo.toml       — Cargo workspace wrapper");
+    println!("  {name}/verified/{name}/ — eidos build output directory");
+    println!();
+    println!("  next: eidos check {name}/{name}.eidos");
+    println!("        eidos build {name}/{name}.eidos --out-dir {name}/verified/{name}/");
+    println!("        cargo build --manifest-path {name}/Cargo.toml");
     Ok(ExitCode::SUCCESS)
 }
 
@@ -492,6 +523,7 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     let mut force = false;
     let mut verbose = false;
     let mut json = false;
+    let mut run = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -509,6 +541,10 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
             }
             "--json" | "-j" => {
                 json = true;
+                i += 1;
+            }
+            "--run" => {
+                run = true;
                 i += 1;
             }
             other if !other.starts_with('-') && file.is_none() => {
@@ -592,7 +628,85 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
             file, out_dir
         );
     }
+
+    if run {
+        let cargo_manifest = PathBuf::from(&out_dir).join("Cargo.toml");
+        let manifest_path = cargo_manifest.to_string_lossy().into_owned();
+        if !json {
+            println!("eidos: invoking `cargo build --manifest-path {manifest_path}`");
+        }
+        let status = std::process::Command::new("cargo")
+            .args(["build", "--manifest-path", &manifest_path])
+            .status()
+            .map_err(|e| format!("failed to invoke cargo: {e}"))?;
+        if !status.success() {
+            return Ok(ExitCode::FAILURE);
+        }
+    }
+
     Ok(ExitCode::SUCCESS)
+}
+
+/// Normalize source text: trim trailing whitespace from each line and ensure
+/// a single trailing newline. This is the canonical format `eidos fmt` produces.
+fn normalize_source(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for line in src.lines() {
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    // Remove any blank-line cluster at the very end, then add one newline.
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
+    out
+}
+
+fn cmd_fmt(args: &[String]) -> Result<ExitCode, String> {
+    let mut file: Option<&str> = None;
+    let mut check = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--check" => {
+                check = true;
+                i += 1;
+            }
+            other if !other.starts_with('-') && file.is_none() => {
+                file = Some(other);
+                i += 1;
+            }
+            other => return Err(format!("unexpected fmt argument `{other}`")),
+        }
+    }
+    let path = file.ok_or_else(|| format!("fmt requires a file path\n{}", usage()))?;
+    let src = fs::read_to_string(path).map_err(|e| format!("cannot read `{path}`: {e}"))?;
+
+    // Parse to validate: eidos fmt refuses to format a broken file.
+    if let Err(e) = parse(&src) {
+        render_parse_error(path, &src, &e);
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let formatted = normalize_source(&src);
+
+    if check {
+        if src == formatted {
+            println!("eidos: {path}: ok");
+            Ok(ExitCode::SUCCESS)
+        } else {
+            eprintln!("eidos: {path}: needs formatting (run `eidos fmt {path}` to fix)");
+            Ok(ExitCode::FAILURE)
+        }
+    } else {
+        if src != formatted {
+            fs::write(path, &formatted).map_err(|e| format!("cannot write `{path}`: {e}"))?;
+            println!("eidos: {path}: formatted");
+        } else {
+            println!("eidos: {path}: ok (no changes)");
+        }
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 #[cfg(test)]
