@@ -21,5 +21,4 @@ tpt-eidos-parser.workspace = true
 tpt-eidos-kernel.workspace = true
 tpt-eidos-erasure.workspace = true
 tpt-eidos-codegen.workspace = true
-tpt-eidos-flight-math.workspace = true
 tpt-eidos-lsp.workspace = true

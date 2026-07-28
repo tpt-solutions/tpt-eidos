@@ -15,4 +15,3 @@ readme = false
 [dependencies]
 tpt-eidos-parser = { workspace = true }
 tpt-eidos-kernel = { workspace = true }
-tpt-eidos-flight-math = { workspace = true }

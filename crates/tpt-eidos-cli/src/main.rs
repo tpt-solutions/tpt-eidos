@@ -13,7 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tpt_eidos_flight_math::check_module;
+use tpt_eidos_kernel::check as check_module;
 use tpt_eidos_parser::parse;
 use tpt_eidos_parser::Span;
 
