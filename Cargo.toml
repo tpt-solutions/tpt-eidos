@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 rust-version = "1.74"
@@ -25,13 +25,13 @@ keywords = ["refinement-types", "verification", "proof", "no-std", "dependently-
 categories = ["compilers", "command-line-utilities", "mathematics", "embedded", "science"]
 
 [workspace.dependencies]
-tpt-eidos-verifier = { path = "crates/tpt-eidos-verifier", version = "0.1.0" }
-tpt-eidos-parser = { path = "crates/tpt-eidos-parser", version = "0.1.0" }
-tpt-eidos-kernel = { path = "crates/tpt-eidos-kernel", version = "0.1.0" }
-tpt-eidos-erasure = { path = "crates/tpt-eidos-erasure", version = "0.1.0" }
-tpt-eidos-codegen = { path = "crates/tpt-eidos-codegen", version = "0.1.0" }
-tpt-eidos-flight-math = { path = "crates/tpt-eidos-flight-math", version = "0.1.0" }
-tpt-eidos-controls-math = { path = "crates/tpt-eidos-controls-math", version = "0.1.0" }
+tpt-eidos-verifier = { path = "crates/tpt-eidos-verifier", version = "0.2.0" }
+tpt-eidos-parser = { path = "crates/tpt-eidos-parser", version = "0.2.0" }
+tpt-eidos-kernel = { path = "crates/tpt-eidos-kernel", version = "0.2.0" }
+tpt-eidos-erasure = { path = "crates/tpt-eidos-erasure", version = "0.2.0" }
+tpt-eidos-codegen = { path = "crates/tpt-eidos-codegen", version = "0.2.0" }
+tpt-eidos-flight-math = { path = "crates/tpt-eidos-flight-math", version = "0.2.0" }
+tpt-eidos-controls-math = { path = "crates/tpt-eidos-controls-math", version = "0.2.0" }
 
 [profile.release]
 opt-level = 3
